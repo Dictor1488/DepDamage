@@ -13,6 +13,6 @@
         "id": "com.author.flyingdamage",
         "name": "Flying Damage",
         "description": "Floating damage numbers above tanks (SWF view). Real damage from onHealthChanged, smooth rise + fade.",
-        "version": "3.0.0"
+        "version": "3.2.0"
     }
 }

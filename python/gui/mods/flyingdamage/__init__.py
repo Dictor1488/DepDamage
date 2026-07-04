@@ -70,6 +70,12 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] installHooks failed', exc_info=True)
 
+        try:
+            from .suppress import installSuppression
+            installSuppression()
+        except Exception:
+            logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
+
         self._registerFlash()
 
         g_playerEvents.onAvatarReady += self._onAvatarReady

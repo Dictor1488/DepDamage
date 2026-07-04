@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 # hooks.py  --  Python 2.7
 # Damage from onHealthChanged (old-new). Trigger showDamageFromShot.
-# World->screen via view-projection matrix (proven method).
+# World->screen via view-projection matrix.
+# Accumulates damage per vehicle over a short window so simultaneous shells
+# (e.g. double-barrel 400+400) merge into ONE number (800), like XVM.
 
 import logging
 
@@ -14,9 +16,11 @@ from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
-_ANCHOR_UP = 2.0
+_ANCHOR_UP = 4.5   # meters above tank origin (above the turret)
+_MERGE_WINDOW = 0.09   # seconds; damage within this window merges into one number
 _ctrlRef = [None]
-_pendingDamage = {}
+_pending = {}          # vehicleID -> accumulated damage
+_callbacks = {}        # vehicleID -> pending callback id
 
 
 def setView(controller):
@@ -24,7 +28,13 @@ def setView(controller):
 
 
 def resetState():
-    _pendingDamage.clear()
+    _pending.clear()
+    for cbid in list(_callbacks.values()):
+        try:
+            BigWorld.cancelCallback(cbid)
+        except Exception:
+            pass
+    _callbacks.clear()
 
 
 def installHooks():
@@ -43,16 +53,7 @@ def installHooks():
             logger.error('[FlyingDamage] capture failed', exc_info=True)
         return result
 
-    @override(Vehicle, 'showDamageFromShot')
-    def _showDamageFromShot(base, self, *args, **kwargs):
-        result = base(self, *args, **kwargs)
-        try:
-            _emit(self)
-        except Exception:
-            logger.error('[FlyingDamage] emit failed', exc_info=True)
-        return result
-
-    logger.info('[FlyingDamage] hooks installed (view SWF)')
+    logger.info('[FlyingDamage] hooks installed (merge window)')
 
 
 def _capture(vehicle, args):
@@ -71,9 +72,40 @@ def _capture(vehicle, args):
     if newH < 0:
         newH = 0
     dmg = oldH - newH
-    if dmg > 0:
-        _pendingDamage[vid] = _pendingDamage.get(vid, 0) + dmg
-        _emit(vehicle)
+    if dmg <= 0:
+        return
+
+    # Accumulate; schedule a single flush after the merge window.
+    _pending[vid] = _pending.get(vid, 0) + dmg
+    if vid not in _callbacks:
+        _callbacks[vid] = BigWorld.callback(
+            _MERGE_WINDOW, lambda: _flush(vid))
+
+
+def _flush(vid):
+    _callbacks.pop(vid, None)
+    damage = _pending.pop(vid, 0)
+    if damage <= 0:
+        return
+    if not g_config.enabled:
+        return
+    ctrl = _ctrlRef[0]
+    if ctrl is None:
+        return
+
+    vehicle = BigWorld.entity(vid)
+    if vehicle is None:
+        return
+
+    res = _project(vehicle)
+    if res is None:
+        return
+    sx, sy, visible = res
+    if not visible:
+        return
+    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f)', damage, sx, sy)
+    ctrl.showDamage(sx, sy, damage, g_config.colorRGBint,
+                    g_config.fontSize, g_config.opacity / 100.0)
 
 
 def _buildVP():
@@ -113,26 +145,3 @@ def _project(vehicle):
     cy = v.y / w
     sw, sh = GUI.screenResolution()[:2]
     return ((0.5 + 0.5 * cx) * sw, (0.5 - 0.5 * cy) * sh, visible)
-
-
-def _emit(vehicle):
-    if not g_config.enabled:
-        return
-    ctrl = _ctrlRef[0]
-    if ctrl is None:
-        return
-    vid = getattr(vehicle, 'id', None)
-    if vid is None:
-        return
-    damage = _pendingDamage.pop(vid, 0)
-    if damage <= 0:
-        return
-    res = _project(vehicle)
-    if res is None:
-        return
-    sx, sy, visible = res
-    if not visible:
-        return
-    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f)', damage, sx, sy)
-    ctrl.showDamage(sx, sy, damage, g_config.colorRGBint,
-                    g_config.fontSize, g_config.opacity / 100.0)
