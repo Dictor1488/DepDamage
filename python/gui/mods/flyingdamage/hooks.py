@@ -75,6 +75,21 @@ def _capture(vehicle, args):
     if dmg <= 0:
         return
 
+    # attackerID is typically the 3rd int arg. Skip damage dealt by the player.
+    if g_config.hideMyDamage and len(ints) >= 3:
+        attackerID = ints[2]
+        try:
+            player = BigWorld.player()
+            myID = getattr(player, 'playerVehicleID', None)
+            if myID is None:
+                myID = getattr(player, 'vehicleID', None)
+            if myID is not None and attackerID == myID:
+                logger.info('[FlyingDamage] skip my damage dmg=%d (attacker=%d==me)',
+                            dmg, attackerID)
+                return  # my own damage -> don't show
+        except Exception:
+            pass
+
     # Accumulate; schedule a single flush after the merge window.
     _pending[vid] = _pending.get(vid, 0) + dmg
     if vid not in _callbacks:

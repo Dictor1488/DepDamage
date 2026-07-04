@@ -27,6 +27,7 @@ class Config(object):
         self.colorIndex = 1   # Yellow
         self.opacity = 100
         self.hideStandard = True
+        self.hideMyDamage = True
 
     @property
     def colorRGB(self):
@@ -69,6 +70,8 @@ class Config(object):
             'column2': [
                 {'type': 'CheckBox', 'text': u'Hide standard damage',
                  'value': self.hideStandard, 'varName': 'hideStandard'},
+                {'type': 'CheckBox', 'text': u'Hide my own damage',
+                 'value': self.hideMyDamage, 'varName': 'hideMyDamage'},
                 {'type': 'Slider', 'text': u'Opacity',
                  'value': self.opacity, 'minimum': 0, 'maximum': 100,
                  'step': 5, 'format': u'{{value}} %', 'varName': 'opacity'},
@@ -86,6 +89,7 @@ class Config(object):
             self.colorIndex = int(s.get('colorIndex', self.colorIndex))
             self.opacity = int(s.get('opacity', self.opacity))
             self.hideStandard = bool(s.get('hideStandard', self.hideStandard))
+            self.hideMyDamage = bool(s.get('hideMyDamage', self.hideMyDamage))
         except Exception:
             logger.error('[FlyingDamage] apply settings failed', exc_info=True)
 

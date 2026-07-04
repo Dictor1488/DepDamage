@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Suppress the game's standard floating damage. XVM shows it is drawn by the
-# vehicle marker (net.wg.gui.battle.views.vehicleMarkers.VehicleMarker), driven
-# from the markers2d plugins we DID find in this client:
-#   VehicleMarkerTargetPlugin, MarkerPlugin
-# We hook the plugin method that pushes the damage number to the marker SWF and
-# no-op it. Names vary, so we scan the known plugin classes and log methods.
+# Diagnostic: dump ALL methods of the vehicle-marker plugins + base classes so
+# we can find the exact method that pushes the standard floating damage number.
 
 import logging
 
@@ -17,44 +13,56 @@ logger = logging.getLogger(__name__)
 _PLUGIN_MODULE = 'gui.Scaleform.daapi.view.battle.shared.markers2d.plugins'
 _PLUGIN_CLASSES = [
     'VehicleMarkerTargetPlugin',
-    'VehicleMarkerTargetPluginReplayPlaying',
     'MarkerPlugin',
 ]
 
-# Method fragments that invoke the marker's damage display (as_* -> flash).
+# Fragments likely to be the damage-display method (broadened).
 _METHOD_HINTS = [
-    'showdamage', 'updatehealth', 'senddamage', 'damageicon',
-    'as_showdamage', 'as_updatehealth', '__updatevehiclehealth',
-    'updatevehiclehealth', 'onvehiclehealthchanged', '_hpchanged',
+    'damage', 'health', 'hp', 'showdmg', 'senddmg', 'hit',
+    'as_show', 'as_update', 'invoke', 'setdamage', 'updatemarker',
 ]
+
+# Method names we must NOT hook (would break the marker entirely).
+_SAFE_SKIP = ['__init__', 'start', 'stop', 'fini', 'init', 'destroy',
+              'restartallmarkers']
 
 
 def installSuppression():
-    if not g_config.hideStandard:
-        logger.info('[FlyingDamage] suppression disabled')
-        return
-
     try:
         mod = __import__(_PLUGIN_MODULE, fromlist=['*'])
     except Exception:
         logger.error('[FlyingDamage] cannot import markers2d.plugins', exc_info=True)
         return
 
+    for clsName in _PLUGIN_CLASSES:
+        cls = getattr(mod, clsName, None)
+        if not isinstance(cls, type):
+            logger.info('[FlyingDamage] %s not found', clsName)
+            continue
+
+        # Dump the full method resolution: class + its base classes.
+        chain = []
+        for c in cls.__mro__:
+            chain.append(c.__name__)
+        logger.info('[FlyingDamage] %s MRO: %s', clsName, chain)
+
+        methods = sorted([m for m in dir(cls) if not m.startswith('__')])
+        logger.info('[FlyingDamage] %s ALL methods: %s', clsName, methods)
+
+    if not g_config.hideStandard:
+        return
+
+    # Try to hook candidates (only after we know names; harmless if none match).
     hooked = 0
     for clsName in _PLUGIN_CLASSES:
         cls = getattr(mod, clsName, None)
         if not isinstance(cls, type):
             continue
-        # Log all methods once, so we can pinpoint if hints miss.
-        allMethods = [m for m in dir(cls) if not m.startswith('__init__')]
-        damageish = [m for m in allMethods
-                     if 'amage' in m.lower() or 'health' in m.lower()]
-        logger.info('[FlyingDamage] %s damage/health methods: %s',
-                    clsName, damageish)
-
-        for m in allMethods:
+        for m in dir(cls):
             ml = m.lower()
-            if any(h in ml for h in _METHOD_HINTS):
+            if ml in _SAFE_SKIP:
+                continue
+            if any(h in ml for h in _METHOD_HINTS) and ('show' in ml or 'damage' in ml):
                 try:
                     def _suppressed(base, self, *a, **k):
                         if g_config.hideStandard:
@@ -64,10 +72,5 @@ def installSuppression():
                     hooked += 1
                     logger.info('[FlyingDamage] suppressed %s.%s', clsName, m)
                 except Exception:
-                    logger.info('[FlyingDamage] suppress fail %s.%s', clsName, m,
-                                exc_info=True)
-
-    if hooked == 0:
-        logger.warning('[FlyingDamage] no method suppressed; see method lists above')
-    else:
-        logger.info('[FlyingDamage] suppression active (%d hooks)', hooked)
+                    pass
+    logger.info('[FlyingDamage] suppression hooks: %d', hooked)
