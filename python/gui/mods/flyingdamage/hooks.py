@@ -101,9 +101,10 @@ def _flush(vid):
     if res is None:
         return
     sx, sy, visible = res
-    if not visible:
+    # Show even slightly off-screen hits (clamp), skip only if fully behind camera.
+    if sx is None or sy is None:
         return
-    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f)', damage, sx, sy)
+    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f) vis=%s', damage, sx, sy, visible)
     ctrl.showDamage(sx, sy, damage, g_config.colorRGBint,
                     g_config.fontSize, g_config.opacity / 100.0)
 
@@ -138,10 +139,10 @@ def _project(vehicle):
     v = Math.Vector4(pos.x, pos.y + _ANCHOR_UP, pos.z, 1.0)
     v = vp.applyV4Point(v)
     w = v.w
-    if w == 0:
-        return None
-    visible = w > 0 and -1 <= v.x / w <= 1 and -1 <= v.y / w <= 1
+    if w <= 0:
+        return None   # truly behind camera
     cx = v.x / w
     cy = v.y / w
+    visible = -1 <= cx <= 1 and -1 <= cy <= 1
     sw, sh = GUI.screenResolution()[:2]
     return ((0.5 + 0.5 * cx) * sw, (0.5 - 0.5 * cy) * sh, visible)
