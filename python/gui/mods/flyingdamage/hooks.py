@@ -123,6 +123,14 @@ def _flush(vid):
     isEnemy = _isEnemy(vehicle, vid)
     color = g_config.colorForTeam(isEnemy)
 
+    # Skip if the projected point is far outside the screen (dead/hidden tank).
+    try:
+        sw, sh = GUI.screenResolution()[:2]
+    except Exception:
+        sw, sh = 1920, 1080
+    if sx < -sw or sx > 2 * sw or sy < -sh or sy > 2 * sh:
+        return
+
     logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f) enemy=%s',
                 damage, sx, sy, isEnemy)
     ctrl.showDamage(sx, sy, damage, color,

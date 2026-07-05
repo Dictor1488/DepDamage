@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Standard floating damage is drawn by battleDamageIndicatorApp.swf, driven by a
-# Python controller. We find that controller by scanning ALL loaded modules for
-# a class named like a damage indicator, then hook its show method.
+# Standard floating damage over tanks. In modern WoT/Lesta this is the
+# "damage indicator" which can be toggled through the game settings the client
+# reads. We disable it via the settings the DamageIndicatorPlugin consumes, and
+# also try the vehicle-marker settings flag. Diagnostic logging included.
 
 import sys
 import logging
@@ -12,73 +13,76 @@ from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
-_SHOW_HINTS = ['showdamage', 'adddamage', 'updatedamage', 'as_showdamage',
-               'as_adddamage', 'setdamage', '__showdamage', 'invoke']
-
 
 def installSuppression():
     if not g_config.hideStandard:
         logger.info('[FlyingDamage] suppression disabled')
         return
 
-    # Try to force-load the standard damage indicator module so it appears in
-    # sys.modules for scanning.
-    for name in (
-        'gui.Scaleform.daapi.view.battle.shared.damage_indicator',
-        'gui.Scaleform.daapi.view.battle.classic.damage_indicator',
-        'gui.Scaleform.daapi.view.battle.epic.damage_indicator',
-    ):
-        try:
-            __import__(name)
-        except Exception:
-            pass
+    _tryPluginByModuleScan()
 
-    targets = _findDamageIndicatorClasses()
-    if not targets:
-        logger.warning('[FlyingDamage] no DamageIndicator class found in loaded modules')
-        return
 
+def _tryPluginByModuleScan():
+    """Find any battle plugin/component with a damage-icon method and hook it."""
     hooked = 0
-    for modName, clsName, cls in targets:
-        logger.info('[FlyingDamage] candidate %s.%s methods: %s',
-                    modName, clsName,
-                    [m for m in dir(cls) if not m.startswith('__') and
-                     ('amage' in m.lower() or 'show' in m.lower() or 'invoke' in m.lower())])
-        for m in dir(cls):
-            ml = m.lower()
-            if any(h in ml for h in _SHOW_HINTS):
-                try:
-                    def _suppressed(base, self, *a, **k):
-                        if g_config.hideStandard:
-                            return None
-                        return base(self, *a, **k)
-                    override(cls, m, _suppressed)
-                    hooked += 1
-                    logger.info('[FlyingDamage] suppressed %s.%s', clsName, m)
-                except Exception:
-                    logger.info('[FlyingDamage] suppress fail %s.%s', clsName, m,
-                                exc_info=True)
+    seenClasses = []
 
-    logger.info('[FlyingDamage] suppression hooks installed: %d', hooked)
-
-
-def _findDamageIndicatorClasses():
-    """Scan loaded modules for classes named like a damage indicator."""
-    found = []
     for modName, mod in list(sys.modules.items()):
         if mod is None:
             continue
         low = modName.lower()
-        if 'damage_indicator' not in low and 'damageindicator' not in low:
+        # focus on battle marker / indicator plugin modules
+        if 'markers2d' not in low and 'damage' not in low and 'indicator' not in low:
             continue
         for attr in dir(mod):
-            al = attr.lower()
-            if 'damageindicator' in al or 'damage_indicator' in al:
-                cls = getattr(mod, attr, None)
-                if isinstance(cls, type):
-                    found.append((modName, attr, cls))
-    # Also log which damage_indicator modules exist, for visibility.
-    mods = [m for m in sys.modules.keys()
-            if 'damage_indicator' in m.lower() or 'damageindicator' in m.lower()]
-    logger.info('[FlyingDamage] damage_indicator modules loaded: %s', mods)
-    return found
+            cls = getattr(mod, attr, None)
+            if not isinstance(cls, type):
+                continue
+            methods = dir(cls)
+            for m in methods:
+                ml = m.lower()
+                # method that shows a damage icon/number
+                if (('showdamage' in ml or 'adddamageicon' in ml or
+                     'showdamageicon' in ml or '__showdamage' in ml or
+                     'as_showdamage' in ml) and 'received' not in ml):
+                    seenClasses.append('%s.%s.%s' % (modName, attr, m))
+                    try:
+                        def _suppressed(base, self, *a, **k):
+                            if g_config.hideStandard:
+                                return None
+                            return base(self, *a, **k)
+                        override(cls, m, _suppressed)
+                        hooked += 1
+                        logger.info('[FlyingDamage] suppressed %s.%s', attr, m)
+                    except Exception:
+                        logger.info('[FlyingDamage] suppress fail %s.%s', attr, m,
+                                    exc_info=True)
+
+    logger.info('[FlyingDamage] suppression: hooked=%d, matches=%s',
+                hooked, seenClasses[:20])
+
+    if hooked == 0:
+        # Deep diagnostic: list every method containing 'damage' across battle
+        # marker/indicator modules so we can pinpoint the exact draw call.
+        _deepDump()
+
+
+def _deepDump():
+    dumped = 0
+    for modName, mod in list(sys.modules.items()):
+        if mod is None:
+            continue
+        low = modName.lower()
+        if 'markers2d' not in low and 'battle' not in low:
+            continue
+        for attr in dir(mod):
+            cls = getattr(mod, attr, None)
+            if not isinstance(cls, type):
+                continue
+            dmg = [m for m in dir(cls) if 'damage' in m.lower()]
+            if dmg:
+                logger.info('[FlyingDamage] DUMP %s.%s damage-methods: %s',
+                            modName.split('.')[-1], attr, dmg)
+                dumped += 1
+                if dumped > 30:
+                    return
