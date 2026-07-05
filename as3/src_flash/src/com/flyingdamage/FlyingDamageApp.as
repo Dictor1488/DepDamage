@@ -2,13 +2,13 @@ package com.flyingdamage
 {
     import flash.display.Sprite;
     import flash.events.Event;
+    import flash.events.TimerEvent;
+    import flash.utils.Timer;
 
     /**
-     * FlyingDamageApp -- Sprite overlay (ExternalFlashComponent, DistanceMarker
-     * pattern). Data flows via PULL: each frame the SWF calls py_pullDamage()
-     * to fetch newly-dealt damage, and py_getScreenPos(vid) to position numbers.
-     * Push-with-params (as_showDamage) does not work across the Scaleform bridge,
-     * so everything is pulled instead.
+     * FlyingDamageApp -- Sprite overlay (ExternalFlashComponent). Data flows via
+     * PULL. We drive updates with a Timer (~60fps) instead of ENTER_FRAME, since
+     * ENTER_FRAME may not fire reliably for this component.
      */
     public class FlyingDamageApp extends Sprite
     {
@@ -17,6 +17,7 @@ package com.flyingdamage
         public var py_log:Function = null;
 
         private var _layer:DamageLayer = null;
+        private var _timer:Timer = null;
 
         public function FlyingDamageApp()
         {
@@ -26,13 +27,23 @@ package com.flyingdamage
         public function as_populate():void
         {
             _ensureLayer();
-            this.addEventListener(Event.ENTER_FRAME, onEnterFrame);
-            log("as_populate");
+            if (_timer == null)
+            {
+                _timer = new Timer(16);  // ~60 fps
+                _timer.addEventListener(TimerEvent.TIMER, onTick);
+            }
+            _timer.start();
+            log("as_populate (timer started)");
         }
 
         public function as_dispose():void
         {
-            this.removeEventListener(Event.ENTER_FRAME, onEnterFrame);
+            if (_timer != null)
+            {
+                _timer.stop();
+                _timer.removeEventListener(TimerEvent.TIMER, onTick);
+                _timer = null;
+            }
             if (_layer)
             {
                 _layer.clearAll();
@@ -62,12 +73,11 @@ package com.flyingdamage
             }
         }
 
-        private function onEnterFrame(e:Event):void
+        private function onTick(e:TimerEvent):void
         {
             if (_layer == null)
                 return;
 
-            // Pull any newly-dealt damage from Python.
             if (py_pullDamage != null)
             {
                 try
@@ -90,7 +100,6 @@ package com.flyingdamage
                 }
             }
 
-            // Update existing numbers (stick to tanks + fly up).
             _layer.tick();
         }
 
