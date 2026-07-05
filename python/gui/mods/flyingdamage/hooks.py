@@ -157,15 +157,32 @@ def _feedFlush(vid):
         return
     ctrl = _ctrlRef[0]
     if ctrl is None:
+        if _feedLog[0] < 10:
+            _feedLog[0] += 1
+            logger.info('[FlyingDamage] feedFlush: ctrl is None (dmg=%d)', damage)
         return
     vehicle = BigWorld.entity(vid)
-    if vehicle is None or not _isVehicleUsable(vehicle):
+    if vehicle is None:
+        if _feedLog[0] < 10:
+            _feedLog[0] += 1
+            logger.info('[FlyingDamage] feedFlush: vehicle None vid=%s', vid)
+        return
+    if not _isVehicleUsable(vehicle):
+        if _feedLog[0] < 10:
+            _feedLog[0] += 1
+            logger.info('[FlyingDamage] feedFlush: vehicle not usable vid=%s', vid)
         return
     isEnemy = _isEnemy(vehicle, vid)
     color = g_config.colorForTeam(isEnemy)
+    if _feedLog[0] < 10:
+        _feedLog[0] += 1
+        logger.info('[FlyingDamage] feedFlush -> showDamage vid=%s dmg=%d', vid, damage)
     # Pass vehicleID; the SWF pulls the live screen position each frame.
     ctrl.showDamage(vid, damage, color,
                     g_config.fontSize, g_config.opacity / 100.0)
+
+
+_feedLog = [0]
 
 
 _projCallLog = [0]
