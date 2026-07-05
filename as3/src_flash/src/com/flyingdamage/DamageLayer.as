@@ -15,12 +15,12 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(vehicleID:String, damage:int,
-                                   colorRGB:uint, fontSize:int, alpha:Number):void
+        public function showDamage(data:Object):void
         {
-            if (damage <= 0)
+            if (data == null || int(data.dmg) <= 0)
                 return;
-            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha);
+
+            var fn:FloatingNumber = new FloatingNumber(_app, data);
             addChild(fn);
             _items.push(fn);
         }
@@ -36,14 +36,12 @@ package com.flyingdamage
             _items = new Vector.<FloatingNumber>();
         }
 
-        // Called each frame by the app; returns number of active items.
         public function tick():int
         {
             var survivors:Vector.<FloatingNumber> = new Vector.<FloatingNumber>();
             for each (var fn:FloatingNumber in _items)
             {
-                var pos:Object = _app.getScreenPos(fn.vehicleID);
-                if (fn.update(pos))
+                if (fn.update())
                     survivors.push(fn);
                 else
                 {
