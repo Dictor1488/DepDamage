@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Suppress standard floating damage by intercepting onVehicleFeedbackReceived on
-# ALL vehicle-marker plugin classes (target marker AND the base marker that
-# shows allies' damage), dropping the damage-number event only.
+# Suppress standard floating damage. Directly import the marker-plugin module
+# and hook onVehicleFeedbackReceived on BOTH the base plugin (allies' damage)
+# and the target plugin (my damage). Drop only the damage-number event.
 
-import sys
 import logging
 
 from .utils import override
@@ -14,13 +13,15 @@ logger = logging.getLogger(__name__)
 
 _installed = [False]
 _logN = [0]
-
-# eventID carrying the floating damage number (12 confirmed on this client).
 _DAMAGE_IDS = set([12])
 
-# Any class whose name ends with this and defines/inherits the feedback method.
-_CLASS_SUFFIX = 'VehicleMarkerPlugin'
-_SKIP = ('flyingdamage',)
+# Modules that define the vehicle marker plugins (import directly; scanning
+# sys.modules at init is unreliable because they may not be loaded yet).
+_MODULES = [
+    'gui.Scaleform.daapi.view.battle.shared.markers2d.plugins',
+    'gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins',
+]
+_CLASSES = ['VehicleMarkerPlugin', 'VehicleMarkerTargetPlugin']
 
 
 def installSuppression():
@@ -40,54 +41,36 @@ def installSuppression():
     logger.info('[FlyingDamage] damage ids: %s', list(_DAMAGE_IDS))
 
     hooked = 0
-    patched_classes = set()
-
-    for modName, mod in list(sys.modules.items()):
-        if mod is None:
+    done = set()
+    for modName in _MODULES:
+        try:
+            mod = __import__(modName, fromlist=_CLASSES)
+        except Exception:
+            logger.info('[FlyingDamage] import %s failed', modName)
             continue
-        low = modName.lower()
-        if any(s in low for s in _SKIP):
-            continue
-        if 'marker' not in low:
-            continue
-        for attr in dir(mod):
-            if not attr.endswith(_CLASS_SUFFIX):
-                continue
-            cls = getattr(mod, attr, None)
+        for clsName in _CLASSES:
+            cls = getattr(mod, clsName, None)
             if not isinstance(cls, type):
                 continue
-            # Only patch a class that DEFINES the method itself (avoid patching
-            # a subclass that just inherits it -> double wrapping).
+            # Hook only if this class DEFINES the method (not inherited).
             if 'onVehicleFeedbackReceived' not in cls.__dict__:
                 continue
             key = (cls.__module__, cls.__name__)
-            if key in patched_classes:
+            if key in done:
                 continue
-            patched_classes.add(key)
+            done.add(key)
             try:
                 override(cls, 'onVehicleFeedbackReceived', _feedbackHook)
                 hooked += 1
-                logger.info('[FlyingDamage] hooked %s (%s)', attr, modName)
+                logger.info('[FlyingDamage] hooked %s.%s', modName, clsName)
             except Exception:
-                logger.info('[FlyingDamage] hook fail %s', modName, exc_info=True)
+                logger.info('[FlyingDamage] hook fail %s.%s', modName, clsName,
+                            exc_info=True)
 
     logger.info('[FlyingDamage] suppression hooks: %d', hooked)
     if hooked == 0:
-        # Fallback: import the canonical module and hook the base class directly.
-        _fallbackHook()
-
-
-def _fallbackHook():
-    try:
-        m = __import__(
-            'gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins',
-            fromlist=['VehicleMarkerPlugin'])
-        cls = getattr(m, 'VehicleMarkerPlugin', None)
-        if cls and hasattr(cls, 'onVehicleFeedbackReceived'):
-            override(cls, 'onVehicleFeedbackReceived', _feedbackHook)
-            logger.info('[FlyingDamage] fallback hooked VehicleMarkerPlugin')
-    except Exception:
-        logger.info('[FlyingDamage] fallback hook failed', exc_info=True)
+        # Nothing hooked yet (modules not loaded at init) -> allow a later retry.
+        _installed[0] = False
 
 
 def _feedbackHook(base, self, *args, **kwargs):
