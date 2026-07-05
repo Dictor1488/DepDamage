@@ -73,7 +73,9 @@ class Controller(object):
         # Install standard-damage suppression early (before marker plugins are
         # created), so the class method is already wrapped.
         try:
-            from .suppress import installSuppression
+            from .suppress import installSuppression, setFeed
+            from .hooks import showDamageForVehicle
+            setFeed(showDamageForVehicle)
             installSuppression()
         except Exception:
             logger.error('[FlyingDamage] early suppression failed', exc_info=True)
@@ -141,7 +143,9 @@ class Controller(object):
 
     def _installSuppressionSafe(self):
         try:
-            from .suppress import installSuppression
+            from .suppress import installSuppression, setFeed
+            from .hooks import showDamageForVehicle
+            setFeed(showDamageForVehicle)
             installSuppression()
         except Exception:
             logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
@@ -193,6 +197,11 @@ class Controller(object):
         try:
             from .hooks import resetState
             resetState()
+        except Exception:
+            pass
+        try:
+            from .suppress import resetState as suppressReset
+            suppressReset()
         except Exception:
             pass
 

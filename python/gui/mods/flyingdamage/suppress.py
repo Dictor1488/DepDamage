@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# The standard floating damage number is drawn by
-#   VehicleMarkerPlugin._updateHealthMarker(vehID, idx, health, aInfo, attackReason, damage?)
-# The 'shot'/attack-reason argument makes it show the damage text. We wrap it and
-# neutralise the damage-text part while keeping the health-bar update, by zeroing
-# the "damage" argument (and/or blanking the attack reason) so no number pops up.
+# UNIFIED approach (user's idea): intercept _updateHealthMarker (the exact call
+# that draws the standard floating damage). From it we:
+#   1) compute the damage (previous health - new health for this vehicle),
+#   2) feed OUR SWF so our number shows exactly when the game's would,
+#   3) suppress the standard number by updating only the health bar via the
+#      plain _setHealthMarker setter.
+# This guarantees our number appears whenever a standard one would, and the
+# standard one never shows.
 
 import sys
 import logging
+
+import BigWorld
 
 from .utils import override
 from .settings.config import g_config
@@ -19,11 +24,21 @@ _logN = [0]
 _SKIP = ('flyingdamage',)
 _TARGET = '_updateHealthMarker'
 
+_lastHealth = {}          # vehicleID -> last known health
+_feedCallback = [None]    # set by controller: fn(vehicleID, damage)
+
+
+def setFeed(fn):
+    _feedCallback[0] = fn
+
+
+def resetState():
+    _lastHealth.clear()
+
 
 def installSuppression():
     if _installed[0]:
         return
-
     for modName in (
         'gui.Scaleform.daapi.view.battle.shared.markers2d.plugins',
         'gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins',
@@ -66,28 +81,37 @@ def installSuppression():
 
 
 def _updateHealthMarkerHook(base, self, *args, **kwargs):
-    # Observed signature: (vehicleID, index, health, aInfoOr0, reason, damage)
-    if _logN[0] < 20:
-        _logN[0] += 1
-        logger.info('[FlyingDamage] HEALTHMARKER args=%s', repr(args)[:120])
-
-    if not g_config.hideStandard:
-        return base(self, *args, **kwargs)
-
-    # Neutralise the damage-text trigger while keeping the health update.
-    # The last positional (damage amount) and/or the attack-reason string is what
-    # makes the marker pop the number. Zero the damage and blank the reason.
-    newArgs = list(args)
+    # Observed signature: (vehicleID, index, newHealth, aInfo, attackReason, extId)
     try:
-        # blank any string reason like 'shot' / 'fire' / 'ramming'
-        for i, a in enumerate(newArgs):
-            if isinstance(a, str) and a in ('shot', 'fire', 'world_collision',
-                                            'ramming', 'death_zone', 'drowning',
-                                            'overturn', 'manual'):
-                newArgs[i] = ''
-        # zero a trailing integer damage value if present (last arg)
-        if newArgs and isinstance(newArgs[-1], int) and newArgs[-1] != 0:
-            newArgs[-1] = 0
+        if len(args) >= 3:
+            vehID = args[0]
+            index = args[1]
+            newHealth = args[2]
+            reason = args[4] if len(args) >= 5 else None
+
+            # Compute damage from health delta.
+            prev = _lastHealth.get(vehID, newHealth)
+            damage = prev - newHealth if isinstance(newHealth, int) else 0
+            _lastHealth[vehID] = newHealth
+
+            if _logN[0] < 15:
+                _logN[0] += 1
+                logger.info('[FlyingDamage] HM veh=%s new=%s dmg=%s reason=%s',
+                            vehID, newHealth, damage, repr(reason))
+
+            # Feed our SWF (controller decides my-damage / color / projection).
+            if damage > 0 and _feedCallback[0] is not None:
+                try:
+                    _feedCallback[0](vehID, damage)
+                except Exception:
+                    logger.error('[FlyingDamage] feed failed', exc_info=True)
+
+            # Suppress standard number: update only the health bar.
+            if g_config.hideStandard:
+                setter = getattr(self, '_setHealthMarker', None)
+                if setter is not None:
+                    return setter(vehID, index, newHealth)
     except Exception:
-        pass
-    return base(self, *newArgs, **kwargs)
+        logger.error('[FlyingDamage] HM hook error', exc_info=True)
+
+    return base(self, *args, **kwargs)

@@ -35,6 +35,14 @@ def resetState():
         except Exception:
             pass
     _callbacks.clear()
+    for cbid in list(_feedCallbacks.values()):
+        try:
+            BigWorld.cancelCallback(cbid)
+        except Exception:
+            pass
+    _feedCallbacks.clear()
+    _feedPending.clear()
+    _lastAttacker.clear()
 
 
 def installHooks():
@@ -48,12 +56,41 @@ def installHooks():
     def _onHealthChanged(base, self, *args, **kwargs):
         result = base(self, *args, **kwargs)
         try:
-            _capture(self, args)
+            _recordAttacker(self, args)
         except Exception:
-            logger.error('[FlyingDamage] capture failed', exc_info=True)
+            pass
         return result
 
-    logger.info('[FlyingDamage] hooks installed (merge window)')
+    logger.info('[FlyingDamage] hooks installed (attacker tracking)')
+
+
+_lastAttacker = {}   # vehicleID -> attackerID
+
+
+def _recordAttacker(vehicle, args):
+    vid = getattr(vehicle, 'id', None)
+    if vid is None:
+        return
+    ints = []
+    for a in args:
+        try:
+            ints.append(int(a))
+        except (TypeError, ValueError):
+            pass
+    # args: (newHealth, oldHealth, attackerID, ...)
+    if len(ints) >= 3:
+        _lastAttacker[vid] = ints[2]
+
+
+def isMyDamage(vid):
+    try:
+        player = BigWorld.player()
+        myID = getattr(player, 'playerVehicleID', None)
+        if myID is None:
+            myID = getattr(player, 'vehicleID', None)
+        return myID is not None and _lastAttacker.get(vid) == myID
+    except Exception:
+        return False
 
 
 def _capture(vehicle, args):
@@ -95,6 +132,51 @@ def _capture(vehicle, args):
     if vid not in _callbacks:
         _callbacks[vid] = BigWorld.callback(
             _MERGE_WINDOW, lambda: _flush(vid))
+
+
+_feedPending = {}
+_feedCallbacks = {}
+_FEED_MERGE = 0.09
+
+
+def showDamageForVehicle(vid, damage):
+    """Called by the suppress hook: accumulate, then project + color + feed SWF."""
+    if not g_config.enabled or damage <= 0:
+        return
+    if g_config.hideMyDamage and isMyDamage(vid):
+        return
+    _feedPending[vid] = _feedPending.get(vid, 0) + damage
+    if vid not in _feedCallbacks:
+        _feedCallbacks[vid] = BigWorld.callback(_FEED_MERGE, lambda: _feedFlush(vid))
+
+
+def _feedFlush(vid):
+    _feedCallbacks.pop(vid, None)
+    damage = _feedPending.pop(vid, 0)
+    if damage <= 0:
+        return
+    ctrl = _ctrlRef[0]
+    if ctrl is None:
+        return
+    vehicle = BigWorld.entity(vid)
+    if vehicle is None or not _isVehicleUsable(vehicle):
+        return
+    res = _project(vehicle)
+    if res is None:
+        return
+    sx, sy, visible = res
+    if sx is None or sy is None:
+        return
+    isEnemy = _isEnemy(vehicle, vid)
+    color = g_config.colorForTeam(isEnemy)
+    try:
+        sw, sh = GUI.screenResolution()[:2]
+    except Exception:
+        sw, sh = 1920, 1080
+    if sx < -sw or sx > 2 * sw or sy < -sh or sy > 2 * sh:
+        return
+    ctrl.showDamage(sx, sy, damage, color,
+                    g_config.fontSize, g_config.opacity / 100.0)
 
 
 def _flush(vid):
