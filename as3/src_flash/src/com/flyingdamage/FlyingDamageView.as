@@ -5,14 +5,13 @@ package com.flyingdamage
 
     /**
      * FlyingDamageView -- floating damage numbers that STICK to the tank.
-     * Each frame the label asks Python for the tank's current screen position
-     * (by vehicleID) and places itself there, plus the upward-fly animation.
+     * The DamageLayer is created lazily on first use so we don't depend on
+     * configUI timing. Each frame the label asks Python for the tank's current
+     * screen position (by vehicleID) and places itself there + upward-fly.
      */
     public class FlyingDamageView extends AbstractView
     {
         private var _layer:DamageLayer = null;
-        private var _configDone:Boolean = false;
-        private var _pending:Array = [];
 
         public var py_getScreenPos:Function = null;
         public var py_log:Function = null;
@@ -22,21 +21,21 @@ package com.flyingdamage
             super();
         }
 
-        override protected function configUI():void
+        private function _ensureLayer():void
         {
-            super.configUI();
-            try
+            if (_layer == null)
             {
                 _layer = new DamageLayer(this);
                 addChild(_layer);
-                _configDone = true;
-                _replayPending();
-                log("configUI done");
+                log("layer created");
             }
-            catch (e:Error)
-            {
-                log("configUI ERROR: " + e.message);
-            }
+        }
+
+        override protected function configUI():void
+        {
+            super.configUI();
+            _ensureLayer();
+            log("configUI done");
         }
 
         override protected function onDispose():void
@@ -47,21 +46,16 @@ package com.flyingdamage
                 if (_layer.parent) _layer.parent.removeChild(_layer);
                 _layer = null;
             }
-            _pending = [];
             py_getScreenPos = null;
             py_log = null;
-            _configDone = false;
             super.onDispose();
         }
 
         public function as_showDamage(vehicleID:Number, damage:int,
                                       colorRGB:uint, fontSize:int, alpha:Number):void
         {
-            if (!_configDone)
-            {
-                _pending.push([vehicleID, damage, colorRGB, fontSize, alpha]);
-                return;
-            }
+            _ensureLayer();
+            log("recv vid=" + vehicleID + " dmg=" + damage);
             if (_layer)
                 _layer.showDamage(vehicleID, damage, colorRGB, fontSize, alpha);
         }
@@ -83,18 +77,6 @@ package com.flyingdamage
             {
             }
             return null;
-        }
-
-        private function _replayPending():void
-        {
-            if (_pending.length == 0) return;
-            var calls:Array = _pending;
-            _pending = [];
-            for (var i:int = 0; i < calls.length; i++)
-            {
-                var a:Array = calls[i];
-                _layer.showDamage(a[0], a[1], a[2], a[3], a[4]);
-            }
         }
 
         private function log(msg:String):void
