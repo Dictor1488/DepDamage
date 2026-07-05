@@ -33,6 +33,7 @@ except Exception:
 
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'FlyingDamageApp'
+_bridgeLog = [False]
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
@@ -53,8 +54,14 @@ class _FlyingDamageMeta(BaseDAAPIModule):
 
     def as_showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         try:
-            if self._isDAAPIInited():
-                self.flashObject.as_showDamage(
+            inited = self._isDAAPIInited()
+            if not _bridgeLog[0]:
+                _bridgeLog[0] = True
+                logger.info('[FlyingDamage] as_showDamage: DAAPIInited=%s flashObj=%s',
+                            inited, self.flashObject is not None)
+            fo = self.flashObject
+            if fo is not None:
+                fo.as_showDamage(
                     float(vehicleID), int(damage),
                     int(colorRGB), int(fontSize), float(alpha))
         except Exception:
