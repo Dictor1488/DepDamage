@@ -70,6 +70,14 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] installHooks failed', exc_info=True)
 
+        # Install standard-damage suppression early (before marker plugins are
+        # created), so the class method is already wrapped.
+        try:
+            from .suppress import installSuppression
+            installSuppression()
+        except Exception:
+            logger.error('[FlyingDamage] early suppression failed', exc_info=True)
+
         self._registerFlash()
 
         g_playerEvents.onAvatarReady += self._onAvatarReady
