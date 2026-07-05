@@ -16,12 +16,22 @@ package com.flyingdamage
      */
     public class FlyingDamageApp extends AbstractView
     {
+        // NOTE: This embed forces the Flex/mxmlc compiler to emit a SymbolClass
+        // tag that binds this class as the SWF document class (idref=0).
+        // Without any embedded asset, Flex leaves SymbolClass empty and the
+        // game cannot instantiate the view (content stays null). Masters-Marks
+        // works for the same reason (it has embedded image assets).
+        [Embed(source="../../../assets/pixel.png")]
+        private static var _AssetAnchor:Class;
+
         private var _layer:DamageLayer = null;
         private var _configDone:Boolean = false;
         private var _pending:Array = [];
 
         public var py_getScreenPos:Function = null;
         public var py_log:Function = null;
+
+        private var _logBuffer:Array = [];
 
         public function FlyingDamageApp()
         {
@@ -137,8 +147,41 @@ package com.flyingdamage
 
         private function log(msg:String):void
         {
-            try { if (py_log != null) py_log("[SWF] " + msg); }
-            catch (e:Error) {}
+            if (py_log != null)
+            {
+                try
+                {
+                    // Flush any buffered messages first.
+                    if (_logBuffer.length > 0)
+                    {
+                        for (var i:int = 0; i < _logBuffer.length; i++)
+                            py_log("[SWF] " + _logBuffer[i]);
+                        _logBuffer = [];
+                    }
+                    py_log("[SWF] " + msg);
+                }
+                catch (e:Error) {}
+            }
+            else
+            {
+                // py_log not assigned yet: buffer for later flush.
+                _logBuffer.push(msg);
+            }
+        }
+
+        // Called by Python right after wiring py_log, to drain buffered logs.
+        public function flushLog():void
+        {
+            if (py_log != null && _logBuffer.length > 0)
+            {
+                try
+                {
+                    for (var i:int = 0; i < _logBuffer.length; i++)
+                        py_log("[SWF] " + _logBuffer[i]);
+                }
+                catch (e:Error) {}
+                _logBuffer = [];
+            }
         }
     }
 }

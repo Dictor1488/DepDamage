@@ -175,6 +175,7 @@ class Controller(object):
         try:
             view.flashObject.py_log = view.py_log
             view.flashObject.py_getScreenPos = self._py_getScreenPos
+            view.flashObject.flushLog()
         except Exception:
             logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
         try:
