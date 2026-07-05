@@ -131,8 +131,6 @@ def _flush(vid):
     if sx < -sw or sx > 2 * sw or sy < -sh or sy > 2 * sh:
         return
 
-    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f) enemy=%s',
-                damage, sx, sy, isEnemy)
     ctrl.showDamage(sx, sy, damage, color,
                     g_config.fontSize, g_config.opacity / 100.0)
 

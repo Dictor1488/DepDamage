@@ -23,10 +23,16 @@ _TARGET_CLASS_SUFFIX = 'VehicleMarkerPlugin'
 _SKIP_MODULE_FRAGMENTS = ('flyingdamage', 'mod_ibs', 'playerspaneldamage')
 
 
+_installed = [False]
+
+
 def installSuppression():
+    if _installed[0]:
+        return
     if not g_config.hideStandard:
         logger.info('[FlyingDamage] suppression disabled')
         return
+    _installed[0] = True
 
     hooked = 0
     for modName, mod in list(sys.modules.items()):
