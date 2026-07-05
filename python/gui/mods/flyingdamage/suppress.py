@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Standard floating damage over tanks is drawn by
-#   VehicleMarkerPlugin.__showDamageIcon  (name-mangled: _VehicleMarkerPlugin__showDamageIcon)
-# across all game modes. We suppress exactly that method, and NOTHING else.
+# Standard floating damage is emitted by VehicleMarkerPlugin when it receives a
+# damage feedback event. We intercept onVehicleFeedbackReceived on that plugin
+# and drop ONLY the damage event (eventID that carries the damage number),
+# leaving HP bar, crits, direction, etc. intact.
 
 import sys
 import logging
@@ -12,19 +13,30 @@ from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
-# The exact (mangled) method that renders the standard damage number.
-_TARGET_METHOD = '_VehicleMarkerPlugin__showDamageIcon'
-
-# Only touch classes whose name ends with this. Never our own module, never
-# Vehicle.*, never other mods' avatar hooks.
-_TARGET_CLASS_SUFFIX = 'VehicleMarkerPlugin'
-
-# Modules we must never patch into.
-_SKIP_MODULE_FRAGMENTS = ('flyingdamage', 'mod_ibs', 'playerspaneldamage')
-
-
 _installed = [False]
-_suppLog = [0]
+_logN = [0]
+
+# The vehicle-marker plugin class that draws the standard damage number.
+_TARGET_CLASS_SUFFIX = 'VehicleMarkerPlugin'
+_SKIP_MODULE_FRAGMENTS = ('flyingdamage',)
+
+# Feedback event ID that carries floating damage. Loaded at runtime.
+_DAMAGE_IDS = [set()]
+
+
+def _loadDamageIds():
+    ids = set()
+    try:
+        from gui.battle_control.battle_constants import FEEDBACK_EVENT_ID as F
+        for name in ('VEHICLE_DAMAGE_RECEIVED', 'VEHICLE_HIT'):
+            v = getattr(F, name, None)
+            if v is not None:
+                ids.add(v)
+    except Exception:
+        pass
+    # eventID=12 confirmed in logs as the damage-number feedback on this client.
+    ids.add(12)
+    return ids
 
 
 def installSuppression():
@@ -35,15 +47,17 @@ def installSuppression():
         return
     _installed[0] = True
 
+    _DAMAGE_IDS[0] = _loadDamageIds()
+    logger.info('[FlyingDamage] damage feedback ids: %s', list(_DAMAGE_IDS[0]))
+
     hooked = 0
     for modName, mod in list(sys.modules.items()):
         if mod is None:
             continue
         low = modName.lower()
-        if any(frag in low for frag in _SKIP_MODULE_FRAGMENTS):
+        if any(f in low for f in _SKIP_MODULE_FRAGMENTS):
             continue
-        # Only scan marker-plugin modules.
-        if 'markers2d' not in low and 'marker' not in low:
+        if 'marker' not in low:
             continue
         for attr in dir(mod):
             if not attr.endswith(_TARGET_CLASS_SUFFIX):
@@ -51,25 +65,24 @@ def installSuppression():
             cls = getattr(mod, attr, None)
             if not isinstance(cls, type):
                 continue
-            if _TARGET_METHOD not in cls.__dict__:
-                # Only patch the class that actually DEFINES it (avoid double).
+            if 'onVehicleFeedbackReceived' not in cls.__dict__:
                 continue
             try:
-                def _suppressed(base, self, *a, **k):
-                    if _suppLog[0] < 10:
-                        _suppLog[0] += 1
-                        logger.info('[FlyingDamage] __showDamageIcon INTERCEPTED '
-                                    '(hide=%s)', g_config.hideStandard)
-                    if g_config.hideStandard:
-                        return None
-                    return base(self, *a, **k)
-                override(cls, _TARGET_METHOD, _suppressed)
+                override(cls, 'onVehicleFeedbackReceived', _feedbackHook)
                 hooked += 1
-                logger.info('[FlyingDamage] suppressed %s.%s (%s)',
-                            attr, _TARGET_METHOD, modName)
+                logger.info('[FlyingDamage] hooked %s.onVehicleFeedbackReceived (%s)',
+                            attr, modName)
             except Exception:
-                logger.info('[FlyingDamage] suppress fail %s', modName, exc_info=True)
+                logger.info('[FlyingDamage] hook fail %s', modName, exc_info=True)
 
-    logger.info('[FlyingDamage] standard damage suppression: %d hooks', hooked)
-    if hooked == 0:
-        logger.warning('[FlyingDamage] no VehicleMarkerPlugin.__showDamageIcon found')
+    logger.info('[FlyingDamage] suppression hooks: %d', hooked)
+
+
+def _feedbackHook(base, self, *args, **kwargs):
+    eventID = args[0] if len(args) >= 1 else None
+    if _logN[0] < 30:
+        _logN[0] += 1
+        logger.info('[FlyingDamage] FB eventID=%s args=%s', repr(eventID), repr(args)[:110])
+    if g_config.hideStandard and eventID in _DAMAGE_IDS[0]:
+        return None   # drop standard damage number
+    return base(self, *args, **kwargs)
