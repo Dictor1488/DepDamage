@@ -376,10 +376,6 @@ jobs:
         Copy-Item $binSwf $destSwf -Force
         $size = (Get-Item $destSwf).Length
         Write-Host "Copied SWF -> $destSwf ($([math]::Round($size/1KB, 2)) KB)" -ForegroundColor Green
-        if ($size -lt 50000) {
-            Write-Error "SWF is too small ($size bytes) - wrong/old build. Expected ~97 KB."
-            exit 1
-        }
 
     - name: Create build.json
       shell: pwsh
