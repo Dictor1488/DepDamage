@@ -52,6 +52,7 @@ class Controller(object):
         self._view = None
         self._viewClass = None
         self._registered = False
+        self._bridgeLog = 0
 
     # -- lifecycle ------------------------------------------------------
 
@@ -222,12 +223,20 @@ class Controller(object):
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         v = self._view
         if v is None:
+            logger.info('[FlyingDamage] showDamage but view is None (dmg=%s)', damage)
             return
         try:
-            if v.flashObject is not None:
-                v.flashObject.as_showDamage(
+            fo = v.flashObject
+            if fo is not None:
+                if self._bridgeLog < 10:
+                    self._bridgeLog += 1
+                    logger.info('[FlyingDamage] -> as_showDamage vid=%s dmg=%s',
+                                vehicleID, damage)
+                fo.as_showDamage(
                     float(vehicleID), int(damage),
                     int(colorRGB), int(fontSize), float(alpha))
+            else:
+                logger.info('[FlyingDamage] showDamage but flashObject None')
         except Exception:
             logger.error('[FlyingDamage] as_showDamage bridge failed', exc_info=True)
 
