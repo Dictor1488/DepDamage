@@ -4,36 +4,35 @@ package com.flyingdamage
     import flash.events.Event;
 
     /**
-     * FlyingDamageApp -- Sprite-based overlay loaded via ExternalFlashComponent
-     * (same mechanism as DistanceMarker, which is proven to actually load and
-     * run over the battle scene). Python calls as_populate() to start the frame
-     * loop; each frame we ask Python for tank screen positions and place the
-     * floating damage numbers there (they stick to the tank + fly upward).
+     * FlyingDamageApp -- Sprite overlay (ExternalFlashComponent, DistanceMarker
+     * pattern). Data flows via PULL: each frame the SWF calls py_pullDamage()
+     * to fetch newly-dealt damage, and py_getScreenPos(vid) to position numbers.
+     * Push-with-params (as_showDamage) does not work across the Scaleform bridge,
+     * so everything is pulled instead.
      */
     public class FlyingDamageApp extends Sprite
     {
-        // Python-assigned callbacks
         public var py_getScreenPos:Function = null;
+        public var py_pullDamage:Function = null;
         public var py_log:Function = null;
 
         private var _layer:DamageLayer = null;
-        private var _ticking:Boolean = false;
 
         public function FlyingDamageApp()
         {
             super();
         }
 
-        // ── called by Python (ExternalFlashComponent lifecycle) ──────────
         public function as_populate():void
         {
             _ensureLayer();
+            this.addEventListener(Event.ENTER_FRAME, onEnterFrame);
             log("as_populate");
         }
 
         public function as_dispose():void
         {
-            _stopTicking();
+            this.removeEventListener(Event.ENTER_FRAME, onEnterFrame);
             if (_layer)
             {
                 _layer.clearAll();
@@ -41,38 +40,16 @@ package com.flyingdamage
                 _layer = null;
             }
             py_getScreenPos = null;
+            py_pullDamage = null;
             py_log = null;
         }
 
-        public function as_showDamage(vehicleID:String, damage:int,
-                                      colorRGB:uint, fontSize:int, alpha:Number):void
-        {
-            _ensureLayer();
-            log("recv vid=" + vehicleID + " dmg=" + damage);
-            if (_layer)
-            {
-                _layer.showDamage(vehicleID, damage, colorRGB, fontSize, alpha);
-                _ensureTicking();
-            }
-        }
-
-        public function as_clear():void
-        {
-            if (_layer) _layer.clearAll();
-        }
-
-        // Called by DamageLayer each frame to get a tank's current screen pos.
         public function getScreenPos(vehicleID:String):Object
         {
             if (py_getScreenPos == null)
                 return null;
-            try
-            {
-                return py_getScreenPos(vehicleID);
-            }
-            catch (e:Error)
-            {
-            }
+            try { return py_getScreenPos(vehicleID); }
+            catch (e:Error) {}
             return null;
         }
 
@@ -85,34 +62,36 @@ package com.flyingdamage
             }
         }
 
-        private function _ensureTicking():void
-        {
-            if (!_ticking)
-            {
-                _ticking = true;
-                this.addEventListener(Event.ENTER_FRAME, onEnterFrame);
-            }
-        }
-
-        private function _stopTicking():void
-        {
-            if (_ticking)
-            {
-                _ticking = false;
-                this.removeEventListener(Event.ENTER_FRAME, onEnterFrame);
-            }
-        }
-
         private function onEnterFrame(e:Event):void
         {
             if (_layer == null)
-            {
-                _stopTicking();
                 return;
+
+            // Pull any newly-dealt damage from Python.
+            if (py_pullDamage != null)
+            {
+                try
+                {
+                    var list:Object = py_pullDamage();
+                    if (list != null && list.length > 0)
+                    {
+                        for (var i:int = 0; i < list.length; i++)
+                        {
+                            var d:Object = list[i];
+                            log("recv vid=" + d.vid + " dmg=" + d.dmg);
+                            _layer.showDamage(String(d.vid), int(d.dmg),
+                                uint(d.color), int(d.size), Number(d.alpha));
+                        }
+                    }
+                }
+                catch (err:Error)
+                {
+                    log("pull error: " + err.message);
+                }
             }
-            var alive:int = _layer.tick();
-            if (alive == 0)
-                _stopTicking();
+
+            // Update existing numbers (stick to tanks + fly up).
+            _layer.tick();
         }
 
         private function log(msg:String):void

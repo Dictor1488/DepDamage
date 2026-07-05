@@ -34,6 +34,7 @@ except Exception:
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'FlyingDamageApp'
 _bridgeLog = [False]
+_damageQueue = [[]]   # list of {vid, dmg, color, size, alpha} pending for SWF
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
@@ -48,25 +49,20 @@ class _FlyingDamageMeta(BaseDAAPIModule):
         except Exception:
             return None
 
+    def py_pullDamage(self):
+        # Return and clear the queue of newly-dealt damage.
+        try:
+            q = _damageQueue[0]
+            if not q:
+                return []
+            _damageQueue[0] = []
+            return q
+        except Exception:
+            return []
+
     def as_populate(self):
         if self._isDAAPIInited():
             self.flashObject.as_populate()
-
-    def as_showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
-        try:
-            if not _bridgeLog[0]:
-                _bridgeLog[0] = True
-                logger.info('[FlyingDamage] as_showDamage: DAAPIInited=%s flashObj=%s',
-                            self._isDAAPIInited(), self.flashObject is not None)
-            fo = self.flashObject
-            if fo is not None:
-                # Pass vehicleID as String: large ints don't map cleanly to
-                # ActionScript Number across the Scaleform bridge.
-                fo.as_showDamage(
-                    str(int(vehicleID)), int(damage),
-                    int(colorRGB), int(fontSize), float(alpha))
-        except Exception:
-            logger.error('[FlyingDamage] as_showDamage failed', exc_info=True)
 
     def as_clear(self):
         if self._isDAAPIInited():
@@ -84,6 +80,7 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         try:
             self.flashObject.py_log = self.py_log
             self.flashObject.py_getScreenPos = self.py_getScreenPos
+            self.flashObject.py_pullDamage = self.py_pullDamage
         except Exception:
             logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
         # Start the frame loop in the SWF.
@@ -221,7 +218,14 @@ class Controller(object):
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         if self._flash is None:
             return
-        self._flash.as_showDamage(vehicleID, damage, colorRGB, fontSize, alpha)
+        # Enqueue; the SWF pulls this via py_pullDamage() each frame.
+        _damageQueue[0].append({
+            'vid': str(int(vehicleID)),
+            'dmg': int(damage),
+            'color': int(colorRGB),
+            'size': int(fontSize),
+            'alpha': float(alpha),
+        })
 
 
 g_controller = Controller()
