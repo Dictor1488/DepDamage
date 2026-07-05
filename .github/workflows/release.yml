@@ -361,6 +361,26 @@ jobs:
             Write-Warning "No SWF files in output directory"
         }
 
+    - name: Copy compiled SWF into resources
+      shell: pwsh
+      run: |
+        Write-Host "=== Copying compiled SWF into resources/in ===" -ForegroundColor Cyan
+        $binSwf = "as3/bin/FlyingDamageApp.swf"
+        $destDir = "resources/in/gui/flash"
+        $destSwf = "$destDir/FlyingDamageApp.swf"
+        if (-not (Test-Path $binSwf)) {
+            Write-Error "Compiled SWF not found at $binSwf"
+            exit 1
+        }
+        New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+        Copy-Item $binSwf $destSwf -Force
+        $size = (Get-Item $destSwf).Length
+        Write-Host "Copied SWF -> $destSwf ($([math]::Round($size/1KB, 2)) KB)" -ForegroundColor Green
+        if ($size -lt 50000) {
+            Write-Error "SWF is too small ($size bytes) - wrong/old build. Expected ~97 KB."
+            exit 1
+        }
+
     - name: Create build.json
       shell: pwsh
       run: |
