@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Suppress standard floating damage. Directly import the marker-plugin module
-# and hook onVehicleFeedbackReceived on BOTH the base plugin (allies' damage)
-# and the target plugin (my damage). Drop only the damage-number event.
+# The standard damage number is drawn by VehicleMarkerPlugin.__showDamageIcon
+# (mangled: _VehicleMarkerPlugin__showDamageIcon). The actual runtime class is a
+# subclass (e.g. VehicleMarkerTargetPluginReplayPlaying). We hook that mangled
+# method on the BASE class where it is defined AND on every loaded subclass,
+# because name-mangled lookups resolve on the instance's own class dict.
 
+import sys
 import logging
 
 from .utils import override
@@ -13,15 +16,9 @@ logger = logging.getLogger(__name__)
 
 _installed = [False]
 _logN = [0]
-_DAMAGE_IDS = set([12])
 
-# Modules that define the vehicle marker plugins (import directly; scanning
-# sys.modules at init is unreliable because they may not be loaded yet).
-_MODULES = [
-    'gui.Scaleform.daapi.view.battle.shared.markers2d.plugins',
-    'gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins',
-]
-_CLASSES = ['VehicleMarkerPlugin', 'VehicleMarkerTargetPlugin']
+_MANGLED = '_VehicleMarkerPlugin__showDamageIcon'
+_SKIP = ('flyingdamage',)
 
 
 def installSuppression():
@@ -29,56 +26,57 @@ def installSuppression():
         return
     if not g_config.hideStandard:
         return
-    _installed[0] = True
 
-    try:
-        from gui.battle_control.battle_constants import FEEDBACK_EVENT_ID as F
-        v = getattr(F, 'VEHICLE_DAMAGE_RECEIVED', None)
-        if v is not None:
-            _DAMAGE_IDS.add(v)
-    except Exception:
-        pass
-    logger.info('[FlyingDamage] damage ids: %s', list(_DAMAGE_IDS))
+    # Ensure the plugin module is loaded.
+    for modName in (
+        'gui.Scaleform.daapi.view.battle.shared.markers2d.plugins',
+        'gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins',
+    ):
+        try:
+            __import__(modName)
+        except Exception:
+            pass
 
     hooked = 0
     done = set()
-    for modName in _MODULES:
-        try:
-            mod = __import__(modName, fromlist=_CLASSES)
-        except Exception:
-            logger.info('[FlyingDamage] import %s failed', modName)
+
+    # Walk all loaded modules; hook the mangled method on ANY class that has it
+    # in its own __dict__ (base + every subclass that redefines/carries it).
+    for modName, mod in list(sys.modules.items()):
+        if mod is None:
             continue
-        for clsName in _CLASSES:
-            cls = getattr(mod, clsName, None)
+        low = modName.lower()
+        if any(s in low for s in _SKIP):
+            continue
+        if 'marker' not in low:
+            continue
+        for attr in dir(mod):
+            cls = getattr(mod, attr, None)
             if not isinstance(cls, type):
                 continue
-            # Hook only if this class DEFINES the method (not inherited).
-            if 'onVehicleFeedbackReceived' not in cls.__dict__:
-                continue
-            key = (cls.__module__, cls.__name__)
-            if key in done:
-                continue
-            done.add(key)
-            try:
-                override(cls, 'onVehicleFeedbackReceived', _feedbackHook)
-                hooked += 1
-                logger.info('[FlyingDamage] hooked %s.%s', modName, clsName)
-            except Exception:
-                logger.info('[FlyingDamage] hook fail %s.%s', modName, clsName,
-                            exc_info=True)
+            # Hook on classes that define the mangled method in their own dict.
+            if _MANGLED in cls.__dict__:
+                key = (cls.__module__, cls.__name__)
+                if key in done:
+                    continue
+                done.add(key)
+                try:
+                    override(cls, _MANGLED, _suppressed)
+                    hooked += 1
+                    logger.info('[FlyingDamage] hooked %s.%s', attr, modName)
+                except Exception:
+                    logger.info('[FlyingDamage] hook fail %s', attr, exc_info=True)
 
-    logger.info('[FlyingDamage] suppression hooks: %d', hooked)
-    if hooked == 0:
-        # Nothing hooked yet (modules not loaded at init) -> allow a later retry.
-        _installed[0] = False
+    logger.info('[FlyingDamage] __showDamageIcon hooks: %d', hooked)
+    if hooked > 0:
+        _installed[0] = True
 
 
-def _feedbackHook(base, self, *args, **kwargs):
-    eventID = args[0] if len(args) >= 1 else None
-    if _logN[0] < 40:
+def _suppressed(base, self, *args, **kwargs):
+    if _logN[0] < 15:
         _logN[0] += 1
-        logger.info('[FlyingDamage] FB eventID=%s cls=%s args=%s',
-                    repr(eventID), type(self).__name__, repr(args)[:100])
-    if g_config.hideStandard and eventID in _DAMAGE_IDS:
+        logger.info('[FlyingDamage] __showDamageIcon SUPPRESSED cls=%s',
+                    type(self).__name__)
+    if g_config.hideStandard:
         return None
     return base(self, *args, **kwargs)
