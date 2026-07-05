@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# DIAGNOSTIC MODE: trace every method call on the vehicle-marker plugin that
-# has "damage"/"invoke"/"marker" in its name, so we can see EXACTLY which call
-# renders the standard floating damage number when a hit lands.
+# DIAGNOSTIC 2: trace ALL methods of the vehicle-marker plugin, but only LOG a
+# call when its arguments contain an int in the damage range (200..3000). This
+# reveals the exact method that carries the standard damage number.
 
 import sys
 import logging
@@ -13,11 +13,25 @@ logger = logging.getLogger(__name__)
 
 _installed = [False]
 _logN = [0]
-_MAX_LOG = 120
-
-_TRACE_HINTS = ('damage', 'invoke', 'showmarker', 'updatemarker', 'setmarker',
-                'addmarker', 'icon')
+_MAX_LOG = 80
 _SKIP = ('flyingdamage',)
+
+
+def _looksLikeDamage(args):
+    def scan(v, depth=0):
+        if depth > 3:
+            return False
+        if isinstance(v, int) and 150 <= v <= 3200:
+            return True
+        if isinstance(v, (tuple, list)):
+            for x in v:
+                if scan(x, depth + 1):
+                    return True
+        return False
+    for a in args:
+        if scan(a):
+            return True
+    return False
 
 
 def installSuppression():
@@ -35,7 +49,6 @@ def installSuppression():
 
     traced = 0
     done = set()
-
     for modName, mod in list(sys.modules.items()):
         if mod is None:
             continue
@@ -51,8 +64,7 @@ def installSuppression():
             if 'VehicleMarkerPlugin' not in [c.__name__ for c in cls.__mro__]:
                 continue
             for mname in list(cls.__dict__.keys()):
-                ml = mname.lower()
-                if not any(h in ml for h in _TRACE_HINTS):
+                if mname.startswith('__') and mname.endswith('__'):
                     continue
                 fn = cls.__dict__.get(mname)
                 if not callable(fn):
@@ -64,22 +76,17 @@ def installSuppression():
                 _trace(cls, mname, fn)
                 traced += 1
 
-    logger.info('[FlyingDamage] TRACE installed on %d methods', traced)
+    logger.info('[FlyingDamage] TRACE2 installed on %d methods', traced)
     if traced > 0:
         _installed[0] = True
 
 
 def _trace(cls, mname, original):
     def wrapper(self, *args, **kwargs):
-        if _logN[0] < _MAX_LOG:
+        if _logN[0] < _MAX_LOG and _looksLikeDamage(args):
             _logN[0] += 1
-            logger.info('[FlyingDamage] CALL %s.%s args=%s',
-                        type(self).__name__, mname, repr(args)[:90])
-        # Suppress if this looks like the damage-number renderer AND hideStandard.
-        if g_config.hideStandard and 'damage' in mname.lower() and 'icon' in mname.lower():
-            if _logN[0] < _MAX_LOG:
-                logger.info('[FlyingDamage] -> SUPPRESSED %s', mname)
-            return None
+            logger.info('[FlyingDamage] DMGCALL %s.%s args=%s',
+                        type(self).__name__, mname, repr(args)[:120])
         return original(self, *args, **kwargs)
     try:
         setattr(cls, mname, wrapper)
