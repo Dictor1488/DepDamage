@@ -2,7 +2,8 @@
 # flyingdamage/__init__.py  --  Python 2.7
 # Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene
 # (same mechanism as DistanceMarker, which reliably loads and runs its SWF).
-# Feeds floating damage numbers that stick to tanks.
+# Feeds floating damage numbers from either a fixed screen point or a fixed
+# world-space anchor captured at hit time.
 
 import logging
 
@@ -34,7 +35,7 @@ except Exception:
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'FlyingDamageApp'
 _bridgeLog = [False]
-_damageQueue = [[]]   # list of {vid, dmg, color, size, alpha} pending for SWF
+_damageQueue = [[]]   # list of pending damage dicts for SWF
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
@@ -48,6 +49,13 @@ class _FlyingDamageMeta(BaseDAAPIModule):
             return projectVehicleScreen(int(vehicleID))
         except Exception:
             return None
+
+    def py_projectWorld(self, x, y, z):
+        try:
+            from .hooks import projectWorldPoint
+            return projectWorldPoint(float(x), float(y), float(z))
+        except Exception:
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
 
     def py_pullDamage(self):
         # Return and clear the queue of newly-dealt damage.
@@ -80,6 +88,7 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         try:
             self.flashObject.py_log = self.py_log
             self.flashObject.py_getScreenPos = self.py_getScreenPos
+            self.flashObject.py_projectWorld = self.py_projectWorld
             self.flashObject.py_pullDamage = self.py_pullDamage
         except Exception:
             logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
@@ -215,17 +224,46 @@ class Controller(object):
         except Exception:
             pass
 
-    def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
+    def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
         if self._flash is None:
             return
-        # Enqueue; the SWF pulls this via py_pullDamage() each frame.
         _damageQueue[0].append({
-            'vid': str(int(vehicleID)),
+            'mode': 'screen',
+            'x': float(x),
+            'y': float(y),
             'dmg': int(damage),
             'color': int(colorRGB),
             'size': int(fontSize),
             'alpha': float(alpha),
+            'rise': float(risePixels),
+            'life': float(lifeTime),
         })
+
+    def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
+                        fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
+        if self._flash is None:
+            return
+        # World-anchor mode: the SWF animates a captured 3D point and asks Python
+        # to project it every frame. This makes the number behave like it belongs
+        # to the tank/world position instead of a free fullscreen overlay.
+        _damageQueue[0].append({
+            'mode': 'world',
+            'wx': float(wx),
+            'wy': float(wy),
+            'wz': float(wz),
+            'x': float(fallbackX),
+            'y': float(fallbackY),
+            'dmg': int(damage),
+            'color': int(colorRGB),
+            'size': int(fontSize),
+            'alpha': float(alpha),
+            'rise': float(riseMeters),
+            'life': float(lifeTime),
+        })
+
+    def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
+        # Backward-compatible alias for older hook code in this project.
+        self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
 
 
 g_controller = Controller()
