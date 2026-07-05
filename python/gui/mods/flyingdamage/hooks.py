@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 # hooks.py  --  Python 2.7
-# Damage from onHealthChanged (old-new). Trigger showDamageFromShot.
-# World->screen via view-projection matrix.
-# Accumulates damage per vehicle over a short window so simultaneous shells
-# (e.g. double-barrel 400+400) merge into ONE number (800), like XVM.
+# Damage source + projection helpers for FlyingDamage.
+#
+# Two display modes are supported:
+#   1) screen_fixed: capture screen x/y once at hit time.
+#   2) world_anchor: capture the tank/world point once at hit time and let the
+#      SWF re-project that fixed world point every frame while it rises. This is
+#      the closest standalone behaviour to XVM-style marker damage without
+#      depending on XVM internals: the number belongs to a world point over the
+#      target, not to a free overlay or to the moving vehicle object.
 
 import logging
 
@@ -16,11 +21,18 @@ from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
-_ANCHOR_UP = 4.5   # meters above tank origin (above the turret)
-_MERGE_WINDOW = 0.09   # seconds; damage within this window merges into one number
+_ANCHOR_UP = 4.5        # meters above tank origin, near turret/marker height
+_MERGE_WINDOW = 0.09    # seconds; merge near-simultaneous damage into one value
 _ctrlRef = [None]
-_pending = {}          # vehicleID -> accumulated damage
-_callbacks = {}        # vehicleID -> pending callback id
+_pending = {}           # vehicleID -> accumulated damage from onHealthChanged
+_callbacks = {}         # vehicleID -> pending callback id
+
+_feedPending = {}       # vehicleID -> accumulated damage from marker hook
+_feedCallbacks = {}
+_FEED_MERGE = 0.09
+_feedLog = [0]
+_projCallLog = [0]
+_lastAttacker = {}      # vehicleID -> attackerID
 
 
 def setView(controller):
@@ -64,9 +76,6 @@ def installHooks():
     logger.info('[FlyingDamage] hooks installed (attacker tracking)')
 
 
-_lastAttacker = {}   # vehicleID -> attackerID
-
-
 def _recordAttacker(vehicle, args):
     vid = getattr(vehicle, 'id', None)
     if vid is None:
@@ -94,6 +103,7 @@ def isMyDamage(vid):
 
 
 def _capture(vehicle, args):
+    """Legacy onHealthChanged capture path. Suppression hook is usually used."""
     vid = getattr(vehicle, 'id', None)
     if vid is None:
         return
@@ -112,7 +122,6 @@ def _capture(vehicle, args):
     if dmg <= 0:
         return
 
-    # attackerID is typically the 3rd int arg. Skip damage dealt by the player.
     if g_config.hideMyDamage and len(ints) >= 3:
         attackerID = ints[2]
         try:
@@ -121,26 +130,17 @@ def _capture(vehicle, args):
             if myID is None:
                 myID = getattr(player, 'vehicleID', None)
             if myID is not None and attackerID == myID:
-                logger.info('[FlyingDamage] skip my damage dmg=%d (attacker=%d==me)',
-                            dmg, attackerID)
-                return  # my own damage -> don't show
+                return
         except Exception:
             pass
 
-    # Accumulate; schedule a single flush after the merge window.
     _pending[vid] = _pending.get(vid, 0) + dmg
     if vid not in _callbacks:
-        _callbacks[vid] = BigWorld.callback(
-            _MERGE_WINDOW, lambda: _flush(vid))
-
-
-_feedPending = {}
-_feedCallbacks = {}
-_FEED_MERGE = 0.09
+        _callbacks[vid] = BigWorld.callback(_MERGE_WINDOW, lambda: _flush(vid))
 
 
 def showDamageForVehicle(vid, damage):
-    """Called by the suppress hook: accumulate, then project + color + feed SWF."""
+    """Called by suppress.py: accumulate, then resolve relation + anchor + feed SWF."""
     if not g_config.enabled or damage <= 0:
         return
     if g_config.hideMyDamage and isMyDamage(vid):
@@ -155,103 +155,77 @@ def _feedFlush(vid):
     damage = _feedPending.pop(vid, 0)
     if damage <= 0:
         return
-    ctrl = _ctrlRef[0]
-    if ctrl is None:
-        if _feedLog[0] < 10:
-            _feedLog[0] += 1
-            logger.info('[FlyingDamage] feedFlush: ctrl is None (dmg=%d)', damage)
-        return
-    vehicle = BigWorld.entity(vid)
-    if vehicle is None:
-        if _feedLog[0] < 10:
-            _feedLog[0] += 1
-            logger.info('[FlyingDamage] feedFlush: vehicle None vid=%s', vid)
-        return
-    if not _isVehicleUsable(vehicle):
-        if _feedLog[0] < 10:
-            _feedLog[0] += 1
-            logger.info('[FlyingDamage] feedFlush: vehicle not usable vid=%s', vid)
-        return
-    isEnemy = _isEnemy(vehicle, vid)
-    color = g_config.colorForTeam(isEnemy)
-    if _feedLog[0] < 10:
-        _feedLog[0] += 1
-        logger.info('[FlyingDamage] feedFlush -> showDamage vid=%s dmg=%d', vid, damage)
-    # Pass vehicleID; the SWF pulls the live screen position each frame.
-    ctrl.showDamage(vid, damage, color,
-                    g_config.fontSize, g_config.opacity / 100.0)
-
-
-_feedLog = [0]
-
-
-_projCallLog = [0]
-
-
-def projectVehicleScreen(vid):
-    """Return {'x','y','ok'} screen position for the tank, called each frame."""
-    if _projCallLog[0] < 5:
-        _projCallLog[0] += 1
-        logger.info('[FlyingDamage] py_getScreenPos called vid=%s', vid)
-    try:
-        vehicle = BigWorld.entity(vid)
-        if vehicle is None or not _isVehicleUsable(vehicle):
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
-        res = _project(vehicle)
-        if res is None:
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
-        sx, sy, visible = res
-        if sx is None or sy is None:
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
-        return {'x': float(sx), 'y': float(sy), 'ok': True}
-    except Exception:
-        return {'x': 0.0, 'y': 0.0, 'ok': False}
+    _showResolvedDamage(vid, damage, 'feedFlush')
 
 
 def _flush(vid):
     _callbacks.pop(vid, None)
     damage = _pending.pop(vid, 0)
-    if damage <= 0:
+    if damage <= 0 or not g_config.enabled:
         return
-    if not g_config.enabled:
-        return
+    _showResolvedDamage(vid, damage, 'healthFlush')
+
+
+def _showResolvedDamage(vid, damage, source):
     ctrl = _ctrlRef[0]
     if ctrl is None:
+        _limitedLog('[FlyingDamage] %s: ctrl is None (dmg=%d)', source, damage)
         return
 
     vehicle = BigWorld.entity(vid)
     if vehicle is None:
+        _limitedLog('[FlyingDamage] %s: vehicle None vid=%s', source, vid)
         return
-
-    # Only show for vehicles that are actually on the scene and alive.
     if not _isVehicleUsable(vehicle):
+        _limitedLog('[FlyingDamage] %s: vehicle not usable vid=%s', source, vid)
         return
 
-    res = _project(vehicle)
-    if res is None:
+    anchor = _vehicleAnchor(vehicle)
+    if anchor is None:
+        _limitedLog('[FlyingDamage] %s: anchor failed vid=%s', source, vid)
         return
-    sx, sy, visible = res
-    # Show even slightly off-screen hits (clamp), skip only if fully behind camera.
+
+    sx, sy, visible = _projectPoint(anchor.x, anchor.y, anchor.z)
     if sx is None or sy is None:
+        return
+    if _isFarOutside(sx, sy):
         return
 
     isEnemy = _isEnemy(vehicle, vid)
     color = g_config.colorForTeam(isEnemy)
 
-    # Skip if the projected point is far outside the screen (dead/hidden tank).
+    if _feedLog[0] < 10:
+        _feedLog[0] += 1
+        logger.info('[FlyingDamage] %s -> showDamage vid=%s dmg=%d mode=%s screen=(%.1f,%.1f) world=(%.2f,%.2f,%.2f)',
+                    source, vid, damage, g_config.anchorMode, sx, sy,
+                    anchor.x, anchor.y, anchor.z)
+
+    if g_config.anchorMode == 'world_anchor':
+        ctrl.showDamageWorld(anchor.x, anchor.y, anchor.z, sx, sy, damage, color,
+                             g_config.fontSize, g_config.opacity / 100.0,
+                             g_config.riseMeters, g_config.lifeTime)
+    else:
+        ctrl.showDamageAt(sx, sy, damage, color,
+                          g_config.fontSize, g_config.opacity / 100.0,
+                          g_config.risePixels, g_config.lifeTime)
+
+
+def _limitedLog(fmt, *args):
+    if _feedLog[0] < 10:
+        _feedLog[0] += 1
+        logger.info(fmt, *args)
+
+
+def _isFarOutside(sx, sy):
     try:
         sw, sh = GUI.screenResolution()[:2]
     except Exception:
         sw, sh = 1920, 1080
-    if sx < -sw or sx > 2 * sw or sy < -sh or sy > 2 * sh:
-        return
-
-    ctrl.showDamage(sx, sy, damage, color,
-                    g_config.fontSize, g_config.opacity / 100.0)
+    return sx < -sw or sx > 2 * sw or sy < -sh or sy > 2 * sh
 
 
 def _isVehicleUsable(vehicle):
-    """True only if the vehicle is on the scene and alive (avoids stray/hidden)."""
+    """True only if the vehicle is on the scene and alive enough for a marker."""
     try:
         if not getattr(vehicle, 'isStarted', False):
             return False
@@ -263,12 +237,10 @@ def _isVehicleUsable(vehicle):
 
 
 def _isEnemy(vehicle, vid):
-    """True if target is on the enemy team, False if ally."""
     try:
         player = BigWorld.player()
         myTeam = getattr(player, 'team', None)
         targetTeam = None
-        # Most reliable: vehicle.publicInfo['team'].
         info = getattr(vehicle, 'publicInfo', None)
         if info is not None:
             try:
@@ -282,6 +254,19 @@ def _isEnemy(vehicle, vid):
     except Exception:
         pass
     return True
+
+
+def _vehicleAnchor(vehicle):
+    """Capture a fixed world point above the vehicle at damage time."""
+    try:
+        tmp = Math.Matrix()
+        tmp.set(vehicle.matrix)
+        pos = tmp.translation
+    except Exception:
+        pos = getattr(vehicle, 'position', None)
+        if pos is None:
+            return None
+    return Math.Vector3(pos.x, pos.y + _ANCHOR_UP, pos.z)
 
 
 def _buildVP():
@@ -299,25 +284,59 @@ def _buildVP():
         return None
 
 
-def _project(vehicle):
+def _projectPoint(x, y, z):
     vp = _buildVP()
     if vp is None:
-        return None
+        return (None, None, False)
     try:
-        tmp = Math.Matrix()
-        tmp.set(vehicle.matrix)
-        pos = tmp.translation
+        v = Math.Vector4(float(x), float(y), float(z), 1.0)
+        v = vp.applyV4Point(v)
+        w = v.w
+        if w <= 0:
+            return (None, None, False)  # behind camera
+        cx = v.x / w
+        cy = v.y / w
+        visible = -1 <= cx <= 1 and -1 <= cy <= 1
+        sw, sh = GUI.screenResolution()[:2]
+        return ((0.5 + 0.5 * cx) * sw, (0.5 - 0.5 * cy) * sh, visible)
     except Exception:
-        pos = getattr(vehicle, 'position', None)
-        if pos is None:
-            return None
-    v = Math.Vector4(pos.x, pos.y + _ANCHOR_UP, pos.z, 1.0)
-    v = vp.applyV4Point(v)
-    w = v.w
-    if w <= 0:
-        return None   # truly behind camera
-    cx = v.x / w
-    cy = v.y / w
-    visible = -1 <= cx <= 1 and -1 <= cy <= 1
-    sw, sh = GUI.screenResolution()[:2]
-    return ((0.5 + 0.5 * cx) * sw, (0.5 - 0.5 * cy) * sh, visible)
+        return (None, None, False)
+
+
+def _project(vehicle):
+    anchor = _vehicleAnchor(vehicle)
+    if anchor is None:
+        return None
+    sx, sy, visible = _projectPoint(anchor.x, anchor.y, anchor.z)
+    if sx is None or sy is None:
+        return None
+    return (sx, sy, visible)
+
+
+def projectVehicleScreen(vid):
+    """Legacy callback kept for compatibility."""
+    if _projCallLog[0] < 5:
+        _projCallLog[0] += 1
+        logger.info('[FlyingDamage] py_getScreenPos called vid=%s', vid)
+    try:
+        vehicle = BigWorld.entity(int(vid))
+        if vehicle is None or not _isVehicleUsable(vehicle):
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
+        res = _project(vehicle)
+        if res is None:
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
+        sx, sy, visible = res
+        return {'x': float(sx), 'y': float(sy), 'ok': sx is not None and sy is not None}
+    except Exception:
+        return {'x': 0.0, 'y': 0.0, 'ok': False}
+
+
+def projectWorldPoint(x, y, z):
+    """SWF callback: project a fixed world point to current screen coordinates."""
+    try:
+        sx, sy, visible = _projectPoint(float(x), float(y), float(z))
+        if sx is None or sy is None or _isFarOutside(sx, sy):
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
+        return {'x': float(sx), 'y': float(sy), 'ok': True, 'visible': bool(visible)}
+    except Exception:
+        return {'x': 0.0, 'y': 0.0, 'ok': False}
