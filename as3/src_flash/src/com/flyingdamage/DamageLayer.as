@@ -15,7 +15,7 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(vehicleID:Number, damage:int,
+        public function showDamage(vehicleID:String, damage:int,
                                    colorRGB:uint, fontSize:int, alpha:Number):void
         {
             if (damage <= 0)

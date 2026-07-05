@@ -44,7 +44,7 @@ package com.flyingdamage
             py_log = null;
         }
 
-        public function as_showDamage(vehicleID:Number, damage:int,
+        public function as_showDamage(vehicleID:String, damage:int,
                                       colorRGB:uint, fontSize:int, alpha:Number):void
         {
             _ensureLayer();
@@ -62,7 +62,7 @@ package com.flyingdamage
         }
 
         // Called by DamageLayer each frame to get a tank's current screen pos.
-        public function getScreenPos(vehicleID:Number):Object
+        public function getScreenPos(vehicleID:String):Object
         {
             if (py_getScreenPos == null)
                 return null;

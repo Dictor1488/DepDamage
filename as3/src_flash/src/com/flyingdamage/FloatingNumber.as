@@ -15,7 +15,7 @@ package com.flyingdamage
      */
     public class FloatingNumber extends Sprite
     {
-        public var vehicleID:Number;
+        public var vehicleID:String;
 
         private var _tf:TextField;
         private var _bornAt:int;
@@ -30,7 +30,7 @@ package com.flyingdamage
         // vertical offset above the tank origin (screen pixels)
         private static const ANCHOR_OFFSET_Y:Number = 0.0;
 
-        public function FloatingNumber(vehicleID:Number, damage:int,
+        public function FloatingNumber(vehicleID:String, damage:int,
                                        colorRGB:uint, fontSize:int, baseAlpha:Number)
         {
             this.vehicleID = vehicleID;

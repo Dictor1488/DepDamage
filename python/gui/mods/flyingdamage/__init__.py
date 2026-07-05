@@ -54,15 +54,16 @@ class _FlyingDamageMeta(BaseDAAPIModule):
 
     def as_showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         try:
-            inited = self._isDAAPIInited()
             if not _bridgeLog[0]:
                 _bridgeLog[0] = True
                 logger.info('[FlyingDamage] as_showDamage: DAAPIInited=%s flashObj=%s',
-                            inited, self.flashObject is not None)
+                            self._isDAAPIInited(), self.flashObject is not None)
             fo = self.flashObject
             if fo is not None:
+                # Pass vehicleID as String: large ints don't map cleanly to
+                # ActionScript Number across the Scaleform bridge.
                 fo.as_showDamage(
-                    float(vehicleID), int(damage),
+                    str(int(vehicleID)), int(damage),
                     int(colorRGB), int(fontSize), float(alpha))
         except Exception:
             logger.error('[FlyingDamage] as_showDamage failed', exc_info=True)
