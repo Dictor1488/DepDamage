@@ -74,8 +74,8 @@ package com.flyingdamage
             }
             catch (e:Error)
             {
-                return null;
             }
+            return null;
         }
 
         private function _replayPending():void
