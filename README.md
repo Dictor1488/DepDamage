@@ -1,38 +1,31 @@
-# Flying Damage — WoT mod (SWF battle view)
+# Flying Damage
 
-Відлітаючий урон над танками, намальований Flash-в'юхою (SWF) як повноцінний
-Scaleform-view — тому AS3-код реально виконується в грі (на відміну від простого
-Sprite-SWF, який Scaleform не запускає).
+WoT mod that shows floating damage numbers through a Scaleform/SWF battle view.
 
-## Структура (як у шаблоні Masters-Marks)
+## Version 3.3.0
+
+This version adds two positioning modes:
+
+- `World anchor / XVM-like` is the default. The mod captures a fixed world-space point above the damaged vehicle at hit time. The SWF re-projects that point every frame while the number rises, so the damage behaves like it belongs to the world/vehicle position instead of a free fullscreen overlay.
+- `Screen fixed fallback` freezes the starting screen x/y and animates upward in pixels. Use it only if world projection behaves incorrectly on a specific client build.
+
+## Main files
+
+```text
+python/gui/mods/mod_flyingdamage.py
+python/gui/mods/flyingdamage/hooks.py
+python/gui/mods/flyingdamage/__init__.py
+python/gui/mods/flyingdamage/settings/config.py
+as3/src_flash/src/com/flyingdamage/FlyingDamageApp.as
+as3/src_flash/src/com/flyingdamage/DamageLayer.as
+as3/src_flash/src/com/flyingdamage/FloatingNumber.as
+build.py
+build.json
 ```
-as3/
-  libs/            — WoT SWC-бібліотеки + playerglobal.swc
-  src_flash/
-    FlyingDamageApp.as3proj      — проект для компіляції SWF
-    src/com/flyingdamage/*.as    — вихідники SWF
-  bin/             — сюди складається скомпільований SWF
-python/
-  gui/mods/mod_flyingdamage.py            — точка входу
-  gui/mods/flyingdamage/                  — контролер, хуки, налаштування
-resources/
-  in/gui/flash/FlyingDamageApp.swf        — SWF, що потрапляє в мод
-build.py           — збірка .wotmod
-build.json         — конфіг збірки
-.github/workflows/release.yml             — CI (компілює SWF + пакує)
-```
 
-## Як зібрати SWF (у тебе, на ПК)
+## Build SWF
 
-### Варіант 1 — Adobe Animate
-Відкрий проєкт як у Masters-Marks (через .fla) і публікуй. `build.py --flash`.
-
-### Варіант 2 — Apache Flex mxmlc (як робить CI)
-1. Встанови Apache Flex SDK 4.16.1 + Java.
-2. Поклади `as3/libs/playerglobal.swc` у Flex SDK
-   (`frameworks/libs/player/32.0/playerglobal.swc`).
-3. Компілюй:
-```
+```text
 mxmlc -source-path+=as3/src_flash/src ^
   -library-path+=as3/libs/playerglobal.swc ^
   -external-library-path+=as3/libs/common-1.0-SNAPSHOT.swc ^
@@ -45,36 +38,28 @@ mxmlc -source-path+=as3/src_flash/src ^
   -external-library-path+=as3/libs/battle.swc ^
   -target-player=32.0 -swf-version=39 -optimize=true ^
   -output=as3/bin/FlyingDamageApp.swf ^
-  -- as3/src_flash/src/com/flyingdamage/FlyingDamageView.as
+  -- as3/src_flash/src/com/flyingdamage/FlyingDamageApp.as
 ```
-4. Скопіюй `as3/bin/FlyingDamageApp.swf` → `resources/in/gui/flash/`.
 
-### Варіант 3 — GitHub Actions (найпростіше)
-Запуш проєкт у свій GitHub-репозиторій і зроби тег `v3.0.0` (або запусти
-workflow вручну). CI сам завантажить Flex SDK, скомпілює SWF і збере .wotmod
-у релізі. Нічого локально ставити не треба.
+Then copy:
 
-## Зібрати .wotmod
+```text
+as3/bin/FlyingDamageApp.swf -> resources/in/gui/flash/FlyingDamageApp.swf
 ```
+
+## Build wotmod
+
+```text
 pip install psutil
 python build.py --distribute
 ```
-Готовий файл — у `build/com.author.flyingdamage_3.0.0.wotmod`.
-Скопіюй у `<WoT>/mods/2.3.0.1/`.
 
-## Як це працює
-1. Python реєструє Scaleform-View, прив'язаний до `FlyingDamageApp.swf`.
-2. На старті бою View вантажиться в бойовий застосунок (`loadView`).
-3. Хук `onHealthChanged` рахує урон, проєктує позицію танка на екран,
-   і викликає `view.flashObject.as_showDamage(x, y, dmg, ...)`.
-4. SWF (AbstractView) малює цифру й анімує підйом + згасання.
+Expected package name:
 
-## Логи
-`<WoT>/python.log`, тег `[FlyingDamage]`. Очікувані рядки:
+```text
+build/com.author.flyingdamage_3.3.0.wotmod
 ```
-[FlyingDamage] flash view registered
-[FlyingDamage] loadView requested
-[FlyingDamage] view _populate
-[FlyingDamage] [SWF] configUI done
-[FlyingDamage] [SWF] recv d=334 x=1152 y=447
-```
+
+## Notes
+
+The source code is ready. The SWF still needs to be compiled with Flex/mxmlc or the existing CI workflow before packaging the final `.wotmod`.
