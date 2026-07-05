@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Suppress the standard floating damage number over tanks.
-# The vehicle-marker plugin receives damage via onVehicleFeedbackReceived and
-# forwards it to the marker SWF (which draws the number). We intercept that
-# method and drop ONLY the damage-type feedback event, leaving everything else
-# (hit direction, crits, etc.) intact.
+# Standard floating damage is drawn by battleDamageIndicatorApp.swf, driven by a
+# Python controller. We find that controller by scanning ALL loaded modules for
+# a class named like a damage indicator, then hook its show method.
 
+import sys
 import logging
 
 from .utils import override
@@ -13,19 +12,8 @@ from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
-_PLUGIN_MODULE = 'gui.Scaleform.daapi.view.battle.shared.markers2d.plugins'
-_PLUGIN_CLASS = 'VehicleMarkerTargetPlugin'
-
-# Feedback event IDs that represent floating damage text over a vehicle.
-_DAMAGE_EVENT_IDS = set()
-_logFeedback = [0]
-_logInvoke = [0]
-
-
-def _loadDamageEventIds():
-    # Intentionally empty: suppressing by feedback eventID also breaks HP bars.
-    # We instead suppress precisely at the marker-invoke level (damage command).
-    return set()
+_SHOW_HINTS = ['showdamage', 'adddamage', 'updatedamage', 'as_showdamage',
+               'as_adddamage', 'setdamage', '__showdamage', 'invoke']
 
 
 def installSuppression():
@@ -33,80 +21,52 @@ def installSuppression():
         logger.info('[FlyingDamage] suppression disabled')
         return
 
-    try:
-        mod = __import__(_PLUGIN_MODULE, fromlist=[_PLUGIN_CLASS])
-        cls = getattr(mod, _PLUGIN_CLASS, None)
-    except Exception:
-        logger.error('[FlyingDamage] import plugin failed', exc_info=True)
+    targets = _findDamageIndicatorClasses()
+    if not targets:
+        logger.warning('[FlyingDamage] no DamageIndicator class found in loaded modules')
         return
 
-    if cls is None or not hasattr(cls, 'onVehicleFeedbackReceived'):
-        logger.warning('[FlyingDamage] onVehicleFeedbackReceived not found')
-        return
-
-    global _DAMAGE_EVENT_IDS
-    _DAMAGE_EVENT_IDS = _loadDamageEventIds()
-    logger.info('[FlyingDamage] damage feedback ids: %s', list(_DAMAGE_EVENT_IDS))
-
-    @override(cls, 'onVehicleFeedbackReceived')
-    def _onFeedback(base, self, *args, **kwargs):
-        # Signature varies: (eventID, vehicleID, value) OR (event,). Detect eventID.
-        eventID = None
-        if len(args) >= 1:
-            first = args[0]
-            eventID = getattr(first, 'eventType', None)
-            if eventID is None:
-                eventID = getattr(first, 'eventID', None)
-            if eventID is None:
-                eventID = first  # assume first positional IS the id
-        if _logFeedback[0] < 25:
-            _logFeedback[0] += 1
-            logger.info('[FlyingDamage] feedback eventID=%s args=%s',
-                        repr(eventID), repr(args)[:120])
-        if g_config.hideStandard and eventID in _DAMAGE_EVENT_IDS:
-            return None
-        return base(self, *args, **kwargs)
-
-    # Also intercept the marker invocation that renders the damage text.
-    for invName in ('_invokeMarker', 'invokeMarker'):
-        if hasattr(cls, invName):
-            def _makeInvHook(name):
-                def _invHook(base, self, *args, **kwargs):
-                    if _logInvoke[0] < 40:
-                        _logInvoke[0] += 1
-                        logger.info('[FlyingDamage] %s args=%s', name, repr(args)[:160])
-                    # Suppress marker calls that show damage text.
-                    if g_config.hideStandard and len(args) >= 2:
-                        cmd = args[1]
-                        if isinstance(cmd, basestring) and 'amage' in cmd:
+    hooked = 0
+    for modName, clsName, cls in targets:
+        logger.info('[FlyingDamage] candidate %s.%s methods: %s',
+                    modName, clsName,
+                    [m for m in dir(cls) if not m.startswith('__') and
+                     ('amage' in m.lower() or 'show' in m.lower() or 'invoke' in m.lower())])
+        for m in dir(cls):
+            ml = m.lower()
+            if any(h in ml for h in _SHOW_HINTS):
+                try:
+                    def _suppressed(base, self, *a, **k):
+                        if g_config.hideStandard:
                             return None
-                    return base(self, *args, **kwargs)
-                return _invHook
-            override(cls, invName, _makeInvHook(invName))
-            logger.info('[FlyingDamage] hooked %s for damage-command filter', invName)
+                        return base(self, *a, **k)
+                    override(cls, m, _suppressed)
+                    hooked += 1
+                    logger.info('[FlyingDamage] suppressed %s.%s', clsName, m)
+                except Exception:
+                    logger.info('[FlyingDamage] suppress fail %s.%s', clsName, m,
+                                exc_info=True)
 
-    logger.info('[FlyingDamage] standard damage suppression installed '
-                '(onVehicleFeedbackReceived filter)')
+    logger.info('[FlyingDamage] suppression hooks installed: %d', hooked)
 
 
-def dumpDamageControllers():
-    """Diagnostic: find controllers that might draw standard floating damage."""
-    try:
-        import BigWorld
-        player = BigWorld.player()
-        sp = getattr(player, 'guiSessionProvider', None)
-        if sp is None:
-            logger.warning('[FlyingDamage] no guiSessionProvider')
-            return
-        shared = getattr(sp, 'shared', None)
-        dynamic = getattr(sp, 'dynamic', None)
-        logger.info('[FlyingDamage] shared ctrls: %s',
-                    [a for a in dir(shared) if not a.startswith('_')] if shared else None)
-        # feedback controller
-        fb = getattr(sp, 'feedback', None) or (getattr(shared, 'feedback', None) if shared else None)
-        if fb is not None:
-            logger.info('[FlyingDamage] feedback ctrl type: %s methods: %s',
-                        type(fb).__name__,
-                        [m for m in dir(fb) if 'amage' in m.lower() or 'marker' in m.lower()])
-    except Exception:
-        logger.info('[FlyingDamage] dumpDamageControllers failed', exc_info=True)
+def _findDamageIndicatorClasses():
+    """Scan loaded modules for classes named like a damage indicator."""
+    found = []
+    for modName, mod in list(sys.modules.items()):
+        if mod is None:
+            continue
+        low = modName.lower()
+        if 'damage_indicator' not in low and 'damageindicator' not in low:
+            continue
+        for attr in dir(mod):
+            al = attr.lower()
+            if 'damageindicator' in al or 'damage_indicator' in al:
+                cls = getattr(mod, attr, None)
+                if isinstance(cls, type):
+                    found.append((modName, attr, cls))
+    # Also log which damage_indicator modules exist, for visibility.
+    mods = [m for m in sys.modules.keys()
+            if 'damage_indicator' in m.lower() or 'damageindicator' in m.lower()]
+    logger.info('[FlyingDamage] damage_indicator modules loaded: %s', mods)
+    return found

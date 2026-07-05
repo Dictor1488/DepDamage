@@ -70,12 +70,6 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] installHooks failed', exc_info=True)
 
-        try:
-            from .suppress import installSuppression
-            installSuppression()
-        except Exception:
-            logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
-
         self._registerFlash()
 
         g_playerEvents.onAvatarReady += self._onAvatarReady
@@ -134,6 +128,15 @@ class Controller(object):
         self._battleMode = True
         logger.info('[FlyingDamage] avatar ready -> injecting battle view')
         self._injectBattleFlash()
+        # Suppress standard damage after battle UI (and its SWF) has loaded.
+        BigWorld.callback(3.0, self._installSuppressionSafe)
+
+    def _installSuppressionSafe(self):
+        try:
+            from .suppress import installSuppression
+            installSuppression()
+        except Exception:
+            logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
 
     def _injectBattleFlash(self, attempt=0):
         if not self._battleMode:
