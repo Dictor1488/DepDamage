@@ -168,8 +168,14 @@ def _feedFlush(vid):
                     g_config.fontSize, g_config.opacity / 100.0)
 
 
+_projCallLog = [0]
+
+
 def projectVehicleScreen(vid):
     """Return {'x','y','ok'} screen position for the tank, called each frame."""
+    if _projCallLog[0] < 5:
+        _projCallLog[0] += 1
+        logger.info('[FlyingDamage] py_getScreenPos called vid=%s', vid)
     try:
         vehicle = BigWorld.entity(vid)
         if vehicle is None or not _isVehicleUsable(vehicle):

@@ -25,11 +25,18 @@ package com.flyingdamage
         override protected function configUI():void
         {
             super.configUI();
-            _layer = new DamageLayer(this);
-            addChild(_layer);
-            _configDone = true;
-            _replayPending();
-            log("configUI done");
+            try
+            {
+                _layer = new DamageLayer(this);
+                addChild(_layer);
+                _configDone = true;
+                _replayPending();
+                log("configUI done");
+            }
+            catch (e:Error)
+            {
+                log("configUI ERROR: " + e.message);
+            }
         }
 
         override protected function onDispose():void

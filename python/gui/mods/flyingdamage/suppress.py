@@ -89,9 +89,16 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
             newHealth = args[2]
             reason = args[4] if len(args) >= 5 else None
 
-            # Compute damage from health delta.
-            prev = _lastHealth.get(vehID, newHealth)
+            # Baseline previous health. On first sight, seed from the vehicle's
+            # max health so the first hit isn't lost (delta would be 0).
+            if vehID in _lastHealth:
+                prev = _lastHealth[vehID]
+            else:
+                prev = _maxHealth(vehID, newHealth)
+
             damage = prev - newHealth if isinstance(newHealth, int) else 0
+            if damage < 0:
+                damage = 0
             _lastHealth[vehID] = newHealth
 
             if _logN[0] < 15:
@@ -115,3 +122,15 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
         logger.error('[FlyingDamage] HM hook error', exc_info=True)
 
     return base(self, *args, **kwargs)
+
+
+def _maxHealth(vehID, fallback):
+    try:
+        import BigWorld
+        veh = BigWorld.entity(vehID)
+        mh = getattr(veh, 'maxHealth', None)
+        if isinstance(mh, int) and mh > 0:
+            return mh
+    except Exception:
+        pass
+    return fallback
