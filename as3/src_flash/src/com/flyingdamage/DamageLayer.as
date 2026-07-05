@@ -5,23 +5,24 @@ package com.flyingdamage
 
     public class DamageLayer extends Sprite
     {
+        private var _view:FlyingDamageView;
         private var _items:Vector.<FloatingNumber>;
         private var _ticking:Boolean = false;
 
-        public function DamageLayer()
+        public function DamageLayer(view:FlyingDamageView)
         {
+            _view = view;
             _items = new Vector.<FloatingNumber>();
             mouseEnabled = false;
             mouseChildren = false;
         }
 
-        public function showDamage(screenX:Number, screenY:Number, damage:int,
+        public function showDamage(vehicleID:Number, damage:int,
                                    colorRGB:uint, fontSize:int, alpha:Number):void
         {
             if (damage <= 0)
                 return;
-            var fn:FloatingNumber = new FloatingNumber(damage, colorRGB, fontSize, alpha);
-            fn.setStart(screenX, screenY);
+            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha);
             addChild(fn);
             _items.push(fn);
             ensureTicking();
@@ -62,7 +63,9 @@ package com.flyingdamage
             var survivors:Vector.<FloatingNumber> = new Vector.<FloatingNumber>();
             for each (var fn:FloatingNumber in _items)
             {
-                if (fn.update())
+                // Ask Python for this tank's current screen position.
+                var pos:Object = _view.getScreenPos(fn.vehicleID);
+                if (fn.update(pos))
                     survivors.push(fn);
                 else
                 {

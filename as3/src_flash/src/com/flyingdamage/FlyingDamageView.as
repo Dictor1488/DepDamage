@@ -4,11 +4,9 @@ package com.flyingdamage
     import net.wg.infrastructure.base.AbstractView;
 
     /**
-     * FlyingDamageView -- Scaleform battle view (AbstractView) that renders
-     * floating damage numbers. Python calls as_showDamage(...) directly.
-     *
-     * Being an AbstractView from base_app.swc makes it Scaleform-compatible,
-     * unlike a plain Sprite SWF (which Scaleform won't instantiate).
+     * FlyingDamageView -- floating damage numbers that STICK to the tank.
+     * Each frame the label asks Python for the tank's current screen position
+     * (by vehicleID) and places itself there, plus the upward-fly animation.
      */
     public class FlyingDamageView extends AbstractView
     {
@@ -16,6 +14,7 @@ package com.flyingdamage
         private var _configDone:Boolean = false;
         private var _pending:Array = [];
 
+        public var py_getScreenPos:Function = null;
         public var py_log:Function = null;
 
         public function FlyingDamageView()
@@ -26,7 +25,7 @@ package com.flyingdamage
         override protected function configUI():void
         {
             super.configUI();
-            _layer = new DamageLayer();
+            _layer = new DamageLayer(this);
             addChild(_layer);
             _configDone = true;
             _replayPending();
@@ -42,29 +41,41 @@ package com.flyingdamage
                 _layer = null;
             }
             _pending = [];
+            py_getScreenPos = null;
             py_log = null;
             _configDone = false;
             super.onDispose();
         }
 
-        // ── called directly by Python ──────────────────────────────────
-        public function as_showDamage(screenX:Number, screenY:Number, damage:int,
+        public function as_showDamage(vehicleID:Number, damage:int,
                                       colorRGB:uint, fontSize:int, alpha:Number):void
         {
             if (!_configDone)
             {
-                _pending.push({fn: this.as_showDamage,
-                    args: [screenX, screenY, damage, colorRGB, fontSize, alpha]});
+                _pending.push([vehicleID, damage, colorRGB, fontSize, alpha]);
                 return;
             }
-            log("recv d=" + damage + " x=" + int(screenX) + " y=" + int(screenY));
             if (_layer)
-                _layer.showDamage(screenX, screenY, damage, colorRGB, fontSize, alpha);
+                _layer.showDamage(vehicleID, damage, colorRGB, fontSize, alpha);
         }
 
         public function as_clear():void
         {
             if (_layer) _layer.clearAll();
+        }
+
+        public function getScreenPos(vehicleID:Number):Object
+        {
+            if (py_getScreenPos == null)
+                return null;
+            try
+            {
+                return py_getScreenPos(vehicleID);
+            }
+            catch (e:Error)
+            {
+                return null;
+            }
         }
 
         private function _replayPending():void
@@ -74,9 +85,8 @@ package com.flyingdamage
             _pending = [];
             for (var i:int = 0; i < calls.length; i++)
             {
-                var c:Object = calls[i];
-                var fn:Function = c.fn as Function;
-                if (fn != null) fn.apply(null, c.args);
+                var a:Array = calls[i];
+                _layer.showDamage(a[0], a[1], a[2], a[3], a[4]);
             }
         }
 

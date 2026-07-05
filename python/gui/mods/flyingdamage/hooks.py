@@ -161,22 +161,28 @@ def _feedFlush(vid):
     vehicle = BigWorld.entity(vid)
     if vehicle is None or not _isVehicleUsable(vehicle):
         return
-    res = _project(vehicle)
-    if res is None:
-        return
-    sx, sy, visible = res
-    if sx is None or sy is None:
-        return
     isEnemy = _isEnemy(vehicle, vid)
     color = g_config.colorForTeam(isEnemy)
-    try:
-        sw, sh = GUI.screenResolution()[:2]
-    except Exception:
-        sw, sh = 1920, 1080
-    if sx < -sw or sx > 2 * sw or sy < -sh or sy > 2 * sh:
-        return
-    ctrl.showDamage(sx, sy, damage, color,
+    # Pass vehicleID; the SWF pulls the live screen position each frame.
+    ctrl.showDamage(vid, damage, color,
                     g_config.fontSize, g_config.opacity / 100.0)
+
+
+def projectVehicleScreen(vid):
+    """Return {'x','y','ok'} screen position for the tank, called each frame."""
+    try:
+        vehicle = BigWorld.entity(vid)
+        if vehicle is None or not _isVehicleUsable(vehicle):
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
+        res = _project(vehicle)
+        if res is None:
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
+        sx, sy, visible = res
+        if sx is None or sy is None:
+            return {'x': 0.0, 'y': 0.0, 'ok': False}
+        return {'x': float(sx), 'y': float(sy), 'ok': True}
+    except Exception:
+        return {'x': 0.0, 'y': 0.0, 'ok': False}
 
 
 def _flush(vid):

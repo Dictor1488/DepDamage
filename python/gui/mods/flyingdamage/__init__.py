@@ -173,13 +173,22 @@ class Controller(object):
         logger.info('[FlyingDamage] view ready, wiring flashObject')
         try:
             view.flashObject.py_log = view.py_log
+            view.flashObject.py_getScreenPos = self._py_getScreenPos
         except Exception:
-            pass
+            logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
         try:
             from .hooks import setView
             setView(self)
         except Exception:
             logger.error('[FlyingDamage] setView failed', exc_info=True)
+
+    def _py_getScreenPos(self, vehicleID):
+        """Called by the SWF each frame to keep the number stuck to the tank."""
+        try:
+            from .hooks import projectVehicleScreen
+            return projectVehicleScreen(int(vehicleID))
+        except Exception:
+            return None
 
     def _onViewDisposed(self, view):
         if self._view is view:
@@ -210,14 +219,14 @@ class Controller(object):
 
     # -- called by hooks to draw a number -------------------------------
 
-    def showDamage(self, screenX, screenY, damage, colorRGB, fontSize, alpha):
+    def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         v = self._view
         if v is None:
             return
         try:
             if v.flashObject is not None:
                 v.flashObject.as_showDamage(
-                    float(screenX), float(screenY), int(damage),
+                    float(vehicleID), int(damage),
                     int(colorRGB), int(fontSize), float(alpha))
         except Exception:
             logger.error('[FlyingDamage] as_showDamage bridge failed', exc_info=True)
