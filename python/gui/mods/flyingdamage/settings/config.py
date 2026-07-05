@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # settings/config.py  --  Python 2.7
-# In-game settings via ModsSettingsAPI: enabled + text size + text color + opacity.
+# In-game settings via ModsSettingsAPI.
 
 import logging
 
@@ -19,27 +19,52 @@ COLOR_PRESETS = [
 ]
 
 
+def _rgbToInt(rgb):
+    r, g, b = rgb
+    return (r << 16) | (g << 8) | b
+
+
 class Config(object):
 
     def __init__(self):
         self.enabled = True
         self.fontSize = 24
-        self.colorIndex = 1   # Yellow
         self.opacity = 100
         self.hideStandard = True
         self.hideMyDamage = True
 
-    @property
-    def colorRGB(self):
-        idx = self.colorIndex
+        # Color-by-relation: enemy red, ally green (defaults).
+        self.colorByTeam = True
+        self.colorIndex = 1          # fallback single color (Yellow)
+        self.enemyColorIndex = 3     # Red
+        self.allyColorIndex = 4      # Green
+
+    # -- derived ----------------------------------------------------------
+
+    def _presetInt(self, idx):
         if idx < 0 or idx >= len(COLOR_PRESETS):
             idx = 0
-        return COLOR_PRESETS[idx][1]
+        return _rgbToInt(COLOR_PRESETS[idx][1])
 
     @property
     def colorRGBint(self):
-        r, g, b = self.colorRGB
-        return (r << 16) | (g << 8) | b
+        return self._presetInt(self.colorIndex)
+
+    @property
+    def enemyColorInt(self):
+        return self._presetInt(self.enemyColorIndex)
+
+    @property
+    def allyColorInt(self):
+        return self._presetInt(self.allyColorIndex)
+
+    def colorForTeam(self, isEnemy):
+        """Return the damage-number color int for the given target relation."""
+        if not self.colorByTeam:
+            return self.colorRGBint
+        return self.enemyColorInt if isEnemy else self.allyColorInt
+
+    # -- ModsSettingsAPI --------------------------------------------------
 
     def registerSettings(self):
         try:
@@ -55,6 +80,12 @@ class Config(object):
 
     def _template(self):
         colorLabels = [lbl for (lbl, _rgb) in COLOR_PRESETS]
+
+        def dropdown(text, value, varName):
+            return {'type': 'Dropdown', 'text': text, 'value': value,
+                    'options': [{'label': l} for l in colorLabels],
+                    'varName': varName}
+
         return {
             'modDisplayName': MOD_DISPLAY_NAME,
             'enabled': self.enabled,
@@ -62,19 +93,21 @@ class Config(object):
                 {'type': 'Slider', 'text': u'Text size',
                  'value': self.fontSize, 'minimum': 12, 'maximum': 48,
                  'step': 1, 'format': u'{{value}} px', 'varName': 'fontSize'},
-                {'type': 'Dropdown', 'text': u'Text color',
-                 'value': self.colorIndex,
-                 'options': [{'label': l} for l in colorLabels],
-                 'varName': 'colorIndex'},
+                {'type': 'CheckBox', 'text': u'Color by team (enemy/ally)',
+                 'value': self.colorByTeam, 'varName': 'colorByTeam'},
+                dropdown(u'Enemy color', self.enemyColorIndex, 'enemyColorIndex'),
+                dropdown(u'Ally color', self.allyColorIndex, 'allyColorIndex'),
+                dropdown(u'Single color (if not by team)',
+                         self.colorIndex, 'colorIndex'),
             ],
             'column2': [
+                {'type': 'Slider', 'text': u'Opacity',
+                 'value': self.opacity, 'minimum': 0, 'maximum': 100,
+                 'step': 5, 'format': u'{{value}} %', 'varName': 'opacity'},
                 {'type': 'CheckBox', 'text': u'Hide standard damage',
                  'value': self.hideStandard, 'varName': 'hideStandard'},
                 {'type': 'CheckBox', 'text': u'Hide my own damage',
                  'value': self.hideMyDamage, 'varName': 'hideMyDamage'},
-                {'type': 'Slider', 'text': u'Opacity',
-                 'value': self.opacity, 'minimum': 0, 'maximum': 100,
-                 'step': 5, 'format': u'{{value}} %', 'varName': 'opacity'},
             ],
         }
 
@@ -86,10 +119,13 @@ class Config(object):
         try:
             self.enabled = bool(s.get('enabled', self.enabled))
             self.fontSize = int(s.get('fontSize', self.fontSize))
-            self.colorIndex = int(s.get('colorIndex', self.colorIndex))
             self.opacity = int(s.get('opacity', self.opacity))
             self.hideStandard = bool(s.get('hideStandard', self.hideStandard))
             self.hideMyDamage = bool(s.get('hideMyDamage', self.hideMyDamage))
+            self.colorByTeam = bool(s.get('colorByTeam', self.colorByTeam))
+            self.colorIndex = int(s.get('colorIndex', self.colorIndex))
+            self.enemyColorIndex = int(s.get('enemyColorIndex', self.enemyColorIndex))
+            self.allyColorIndex = int(s.get('allyColorIndex', self.allyColorIndex))
         except Exception:
             logger.error('[FlyingDamage] apply settings failed', exc_info=True)
 

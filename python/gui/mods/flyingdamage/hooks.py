@@ -119,9 +119,36 @@ def _flush(vid):
     # Show even slightly off-screen hits (clamp), skip only if fully behind camera.
     if sx is None or sy is None:
         return
-    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f) vis=%s', damage, sx, sy, visible)
-    ctrl.showDamage(sx, sy, damage, g_config.colorRGBint,
+
+    isEnemy = _isEnemy(vehicle, vid)
+    color = g_config.colorForTeam(isEnemy)
+
+    logger.info('[FlyingDamage] dmg=%d screen=(%.0f,%.0f) enemy=%s',
+                damage, sx, sy, isEnemy)
+    ctrl.showDamage(sx, sy, damage, color,
                     g_config.fontSize, g_config.opacity / 100.0)
+
+
+def _isEnemy(vehicle, vid):
+    """True if target is on the enemy team, False if ally."""
+    try:
+        player = BigWorld.player()
+        myTeam = getattr(player, 'team', None)
+        # Try the vehicle's own team attribute first.
+        targetTeam = getattr(vehicle, 'team', None)
+        if targetTeam is None:
+            # Fall back to arena vehicle info.
+            arena = getattr(player, 'arena', None)
+            if arena is not None:
+                info = arena.vehicles.get(vid)
+                if info is not None:
+                    targetTeam = info.get('team')
+        if myTeam is not None and targetTeam is not None:
+            return targetTeam != myTeam
+    except Exception:
+        pass
+    # Default to enemy if unknown (most damage is to enemies).
+    return True
 
 
 def _buildVP():

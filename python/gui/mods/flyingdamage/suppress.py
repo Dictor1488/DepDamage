@@ -21,6 +21,18 @@ def installSuppression():
         logger.info('[FlyingDamage] suppression disabled')
         return
 
+    # Try to force-load the standard damage indicator module so it appears in
+    # sys.modules for scanning.
+    for name in (
+        'gui.Scaleform.daapi.view.battle.shared.damage_indicator',
+        'gui.Scaleform.daapi.view.battle.classic.damage_indicator',
+        'gui.Scaleform.daapi.view.battle.epic.damage_indicator',
+    ):
+        try:
+            __import__(name)
+        except Exception:
+            pass
+
     targets = _findDamageIndicatorClasses()
     if not targets:
         logger.warning('[FlyingDamage] no DamageIndicator class found in loaded modules')
