@@ -24,6 +24,7 @@ _SKIP_MODULE_FRAGMENTS = ('flyingdamage', 'mod_ibs', 'playerspaneldamage')
 
 
 _installed = [False]
+_suppLog = [0]
 
 
 def installSuppression():
@@ -55,6 +56,10 @@ def installSuppression():
                 continue
             try:
                 def _suppressed(base, self, *a, **k):
+                    if _suppLog[0] < 10:
+                        _suppLog[0] += 1
+                        logger.info('[FlyingDamage] __showDamageIcon INTERCEPTED '
+                                    '(hide=%s)', g_config.hideStandard)
                     if g_config.hideStandard:
                         return None
                     return base(self, *a, **k)

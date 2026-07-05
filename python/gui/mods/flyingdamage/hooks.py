@@ -112,6 +112,10 @@ def _flush(vid):
     if vehicle is None:
         return
 
+    # Only show for vehicles that are actually on the scene and alive.
+    if not _isVehicleUsable(vehicle):
+        return
+
     res = _project(vehicle)
     if res is None:
         return
@@ -135,25 +139,37 @@ def _flush(vid):
                     g_config.fontSize, g_config.opacity / 100.0)
 
 
+def _isVehicleUsable(vehicle):
+    """True only if the vehicle is on the scene and alive (avoids stray/hidden)."""
+    try:
+        if not getattr(vehicle, 'isStarted', False):
+            return False
+        if hasattr(vehicle, 'isAlive') and not vehicle.isAlive():
+            return False
+    except Exception:
+        return False
+    return True
+
+
 def _isEnemy(vehicle, vid):
     """True if target is on the enemy team, False if ally."""
     try:
         player = BigWorld.player()
         myTeam = getattr(player, 'team', None)
-        # Try the vehicle's own team attribute first.
-        targetTeam = getattr(vehicle, 'team', None)
+        targetTeam = None
+        # Most reliable: vehicle.publicInfo['team'].
+        info = getattr(vehicle, 'publicInfo', None)
+        if info is not None:
+            try:
+                targetTeam = info['team']
+            except Exception:
+                targetTeam = None
         if targetTeam is None:
-            # Fall back to arena vehicle info.
-            arena = getattr(player, 'arena', None)
-            if arena is not None:
-                info = arena.vehicles.get(vid)
-                if info is not None:
-                    targetTeam = info.get('team')
+            targetTeam = getattr(vehicle, 'team', None)
         if myTeam is not None and targetTeam is not None:
             return targetTeam != myTeam
     except Exception:
         pass
-    # Default to enemy if unknown (most damage is to enemies).
     return True
 
 
