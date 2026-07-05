@@ -1,18 +1,22 @@
 package com.flyingdamage
 {
     import flash.display.Sprite;
-    import flash.events.Event;
     import flash.events.TimerEvent;
     import flash.utils.Timer;
 
     /**
-     * FlyingDamageApp -- Sprite overlay (ExternalFlashComponent). Data flows via
-     * PULL. We drive updates with a Timer (~60fps) instead of ENTER_FRAME, since
-     * ENTER_FRAME may not fire reliably for this component.
+     * FlyingDamageApp -- ExternalFlashComponent.
+     *
+     * Items can be animated in two modes:
+     *   - screen: fixed screen x/y fallback.
+     *   - world: fixed world x/y/z captured at hit time; every frame the SWF
+     *            asks Python to project that world point. This behaves much
+     *            closer to XVM marker damage than a free overlay.
      */
     public class FlyingDamageApp extends Sprite
     {
-        public var py_getScreenPos:Function = null;
+        public var py_getScreenPos:Function = null;   // legacy compatibility
+        public var py_projectWorld:Function = null;
         public var py_pullDamage:Function = null;
         public var py_log:Function = null;
 
@@ -22,6 +26,8 @@ package com.flyingdamage
         public function FlyingDamageApp()
         {
             super();
+            mouseEnabled = false;
+            mouseChildren = false;
         }
 
         public function as_populate():void
@@ -36,6 +42,12 @@ package com.flyingdamage
             log("as_populate (timer started)");
         }
 
+        public function as_clear():void
+        {
+            if (_layer != null)
+                _layer.clearAll();
+        }
+
         public function as_dispose():void
         {
             if (_timer != null)
@@ -44,15 +56,25 @@ package com.flyingdamage
                 _timer.removeEventListener(TimerEvent.TIMER, onTick);
                 _timer = null;
             }
-            if (_layer)
+            if (_layer != null)
             {
                 _layer.clearAll();
-                if (_layer.parent) _layer.parent.removeChild(_layer);
+                if (_layer.parent != null) _layer.parent.removeChild(_layer);
                 _layer = null;
             }
             py_getScreenPos = null;
+            py_projectWorld = null;
             py_pullDamage = null;
             py_log = null;
+        }
+
+        public function projectWorld(wx:Number, wy:Number, wz:Number):Object
+        {
+            if (py_projectWorld == null)
+                return null;
+            try { return py_projectWorld(wx, wy, wz); }
+            catch (e:Error) {}
+            return null;
         }
 
         public function getScreenPos(vehicleID:String):Object
@@ -88,9 +110,7 @@ package com.flyingdamage
                         for (var i:int = 0; i < list.length; i++)
                         {
                             var d:Object = list[i];
-                            log("recv vid=" + d.vid + " dmg=" + d.dmg);
-                            _layer.showDamage(String(d.vid), int(d.dmg),
-                                uint(d.color), int(d.size), Number(d.alpha));
+                            _layer.showDamage(d);
                         }
                     }
                 }
