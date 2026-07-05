@@ -33,6 +33,15 @@ class Config(object):
         self.hideStandard = True
         self.hideMyDamage = True
 
+        # Positioning / animation. world_anchor is the closest standalone
+        # behaviour to XVM markers: the number is tied to a captured world point
+        # above the damaged tank and projected every frame. screen_fixed is the
+        # fallback that freezes the starting screen x/y.
+        self.anchorMode = 'world_anchor'
+        self.risePixels = 55
+        self.riseMeters = 1.35
+        self.lifeTime = 1.6
+
         # Color-by-relation: enemy red, ally green (defaults).
         self.colorByTeam = True
         self.colorIndex = 1          # fallback single color (Yellow)
@@ -86,6 +95,9 @@ class Config(object):
                     'options': [{'label': l} for l in colorLabels],
                     'varName': varName}
 
+        anchorLabels = [u'World anchor / XVM-like', u'Screen fixed fallback']
+        anchorValue = 0 if self.anchorMode == 'world_anchor' else 1
+
         return {
             'modDisplayName': MOD_DISPLAY_NAME,
             'enabled': self.enabled,
@@ -99,6 +111,10 @@ class Config(object):
                 dropdown(u'Ally color', self.allyColorIndex, 'allyColorIndex'),
                 dropdown(u'Single color (if not by team)',
                          self.colorIndex, 'colorIndex'),
+                {'type': 'Dropdown', 'text': u'Position mode',
+                 'value': anchorValue,
+                 'options': [{'label': l} for l in anchorLabels],
+                 'varName': 'anchorMode'},
             ],
             'column2': [
                 {'type': 'Slider', 'text': u'Opacity',
@@ -108,6 +124,12 @@ class Config(object):
                  'value': self.hideStandard, 'varName': 'hideStandard'},
                 {'type': 'CheckBox', 'text': u'Hide my own damage',
                  'value': self.hideMyDamage, 'varName': 'hideMyDamage'},
+                {'type': 'Slider', 'text': u'Rise height',
+                 'value': self.riseMeters, 'minimum': 0.4, 'maximum': 3.0,
+                 'step': 0.05, 'format': u'{{value}} m', 'varName': 'riseMeters'},
+                {'type': 'Slider', 'text': u'Lifetime',
+                 'value': self.lifeTime, 'minimum': 0.6, 'maximum': 3.0,
+                 'step': 0.1, 'format': u'{{value}} s', 'varName': 'lifeTime'},
             ],
         }
 
@@ -126,6 +148,18 @@ class Config(object):
             self.colorIndex = int(s.get('colorIndex', self.colorIndex))
             self.enemyColorIndex = int(s.get('enemyColorIndex', self.enemyColorIndex))
             self.allyColorIndex = int(s.get('allyColorIndex', self.allyColorIndex))
+            mode = s.get('anchorMode', self.anchorMode)
+            # ModsSettingsAPI may return dropdown index or stored string.
+            if mode == 0 or mode == '0' or mode == 'world_anchor':
+                self.anchorMode = 'world_anchor'
+            elif mode == 1 or mode == '1' or mode == 'screen_fixed':
+                self.anchorMode = 'screen_fixed'
+            else:
+                self.anchorMode = 'world_anchor'
+            self.riseMeters = float(s.get('riseMeters', self.riseMeters))
+            self.lifeTime = float(s.get('lifeTime', self.lifeTime))
+            # screen_fixed uses pixels; keep it proportional to world-anchor height.
+            self.risePixels = int(max(20, min(160, self.riseMeters * 42.0)))
         except Exception:
             logger.error('[FlyingDamage] apply settings failed', exc_info=True)
 
