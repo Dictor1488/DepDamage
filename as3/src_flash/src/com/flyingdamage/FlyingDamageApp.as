@@ -9,8 +9,9 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * Resolution independent build: Python sends normalized screen coordinates
-     * 0..1. AS3 maps them to the current stage size.
+     * Python queues damage events. AS3 renders visible flying numbers and, for
+     * vehicle anchored events, asks Python for the current screen projection of
+     * the damaged vehicle every tick.
      */
     public class FlyingDamageApp extends Sprite
     {
@@ -22,7 +23,6 @@ package com.flyingdamage
         private var _layer:DamageLayer = null;
         private var _timer:Timer = null;
         private var _debugShown:int = 0;
-        private var _selfTestShown:Boolean = false;
         private var _positionLogged:Boolean = false;
         private var _pullLogged:int = 0;
         private var _emptyPollLogged:Boolean = false;
@@ -58,13 +58,7 @@ package com.flyingdamage
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
-            log("as_populate (timer started, normalized coordinates)");
-
-            if (!_selfTestShown)
-            {
-                _selfTestShown = true;
-                as_showDamageNormalized(0.5, 0.5, 8888, 0x00FFFF, 42, 1.0, 0.075, 4.0);
-            }
+            log("as_populate (timer started, vehicle-anchored coordinates)");
         }
 
         public function as_showDamageScreen(x:Number, y:Number, damage:int,
@@ -72,8 +66,6 @@ package com.flyingdamage
                                             alpha:Number, rise:Number,
                                             life:Number):void
         {
-            // Backward-compatible entry point: if x/y are 0..1, treat them as
-            // normalized. Otherwise use raw pixels.
             if (_isNormalized(x, y))
                 as_showDamageNormalized(x, y, damage, colorRGB, fontSize, alpha, rise, life);
             else
@@ -133,6 +125,28 @@ package com.flyingdamage
             }
         }
 
+        public function as_showDamageVehicle(vehicleID:int,
+                                             fallbackNX:Number, fallbackNY:Number,
+                                             damage:int, colorRGB:uint,
+                                             fontSize:int, alpha:Number,
+                                             riseMeters:Number, life:Number):void
+        {
+            _ensureLayer();
+            _updateAppPosition();
+            try
+            {
+                _layer.showVehicleDamage(vehicleID, _stageW() * fallbackNX, _stageH() * fallbackNY,
+                                         damage, colorRGB, fontSize, alpha, riseMeters, life);
+                _debugShown++;
+                if (_debugShown <= 40)
+                    log("as_showDamageVehicle vid=" + vehicleID + " d=" + damage + " norm=(" + fallbackNX + "," + fallbackNY + ") stage=(" + _stageW() + "," + _stageH() + ")");
+            }
+            catch (e:Error)
+            {
+                log("as_showDamageVehicle error: " + e.message);
+            }
+        }
+
         public function as_clear():void
         {
             if (_layer != null)
@@ -157,6 +171,24 @@ package com.flyingdamage
             py_projectWorld = null;
             py_pullDamageText = null;
             py_log = null;
+        }
+
+        public function projectVehicle(vehicleID:int, riseMeters:Number):Object
+        {
+            if (py_getScreenPos == null)
+                return null;
+            try
+            {
+                var pos:Object = py_getScreenPos(vehicleID, riseMeters);
+                if (pos != null && pos.ok && pos.normalized)
+                {
+                    pos.x = _stageW() * Number(pos.x);
+                    pos.y = _stageH() * Number(pos.y);
+                }
+                return pos;
+            }
+            catch (e:Error) {}
+            return null;
         }
 
         public function projectWorld(wx:Number, wy:Number, wz:Number):Object
@@ -193,7 +225,7 @@ package com.flyingdamage
             if (!_positionLogged)
             {
                 _positionLogged = true;
-                log("root 0,0; normalized render; stage=" + _stageW() + "x" + _stageH());
+                log("root 0,0; vehicle anchored render; stage=" + _stageW() + "x" + _stageH());
             }
         }
 
@@ -278,6 +310,11 @@ package com.flyingdamage
                     as_showDamageWorld(Number(p[1]), Number(p[2]), Number(p[3]),
                                        Number(p[4]), Number(p[5]), int(p[6]), uint(p[7]),
                                        int(p[8]), Number(p[9]), Number(p[10]), Number(p[11]));
+                }
+                else if (p[0] == "V" && p.length >= 10)
+                {
+                    as_showDamageVehicle(int(p[1]), Number(p[2]), Number(p[3]), int(p[4]), uint(p[5]),
+                                         int(p[6]), Number(p[7]), Number(p[8]), Number(p[9]));
                 }
             }
             catch (e:Error)
