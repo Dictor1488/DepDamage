@@ -1,7 +1,6 @@
 package com.flyingdamage
 {
     import flash.display.Sprite;
-    import flash.display.Shape;
     import flash.text.TextField;
     import flash.text.TextFormat;
     import flash.text.TextFieldAutoSize;
@@ -9,89 +8,34 @@ package com.flyingdamage
     import flash.filters.GlowFilter;
     import flash.utils.getTimer;
 
+    /**
+     * One damage number that STICKS to a tank (by vehicleID) and flies upward.
+     * Every frame it is positioned at the tank's current screen pos + a rising,
+     * fading animation offset. Smooth upward motion is preserved.
+     */
     public class FloatingNumber extends Sprite
     {
-        private var _app:FlyingDamageApp;
+        public var vehicleID:String;
+
         private var _tf:TextField;
-        private var _dbg:Shape;
         private var _bornAt:int;
         private var _baseAlpha:Number;
-        private var _mode:String;
-        private var _lifeTime:Number;
-        private var _rise:Number;
+        private var _lastX:Number = 0;
+        private var _lastY:Number = 0;
+        private var _hasPos:Boolean = false;
 
-        private var _startX:Number;
-        private var _startY:Number;
-        private var _wx:Number;
-        private var _wy:Number;
-        private var _wz:Number;
-        private var _vehicleID:int;
-        private var _projectLog:int = 0;
-        private var _failed:Boolean = false;
-
-        private static const DEFAULT_LIFETIME:Number = 1.6;
-        private static const DEFAULT_RISE:Number = 55.0;
+        private static const LIFETIME:Number = 1.6;
+        private static const RISE_PIXELS:Number = 55.0;
         private static const FADE_START:Number = 0.5;
+        // vertical offset above the tank origin (screen pixels)
+        private static const ANCHOR_OFFSET_Y:Number = 0.0;
 
-        public static function createScreen(app:FlyingDamageApp, x:Number, y:Number,
-                                            damage:int, colorRGB:uint,
-                                            fontSize:int, alpha:Number,
-                                            rise:Number, life:Number):FloatingNumber
+        public function FloatingNumber(vehicleID:String, damage:int,
+                                       colorRGB:uint, fontSize:int, baseAlpha:Number)
         {
-            return new FloatingNumber(app, "screen", x, y, 0, 0, 0, 0, damage,
-                                      colorRGB, fontSize, alpha, rise, life);
-        }
-
-        public static function createWorld(app:FlyingDamageApp, wx:Number, wy:Number, wz:Number,
-                                           fallbackX:Number, fallbackY:Number,
-                                           damage:int, colorRGB:uint,
-                                           fontSize:int, alpha:Number,
-                                           rise:Number, life:Number):FloatingNumber
-        {
-            return new FloatingNumber(app, "world", fallbackX, fallbackY, wx, wy, wz, 0,
-                                      damage, colorRGB, fontSize, alpha, rise, life);
-        }
-
-        public static function createVehicle(app:FlyingDamageApp, vehicleID:int,
-                                             fallbackX:Number, fallbackY:Number,
-                                             damage:int, colorRGB:uint,
-                                             fontSize:int, alpha:Number,
-                                             riseMeters:Number, life:Number):FloatingNumber
-        {
-            return new FloatingNumber(app, "vehicle", fallbackX, fallbackY, 0, 0, 0, vehicleID,
-                                      damage, colorRGB, fontSize, alpha, riseMeters, life);
-        }
-
-        public function FloatingNumber(app:FlyingDamageApp, mode:String,
-                                       startX:Number, startY:Number,
-                                       wx:Number, wy:Number, wz:Number,
-                                       vehicleID:int,
-                                       damage:int, colorRGB:uint,
-                                       fontSize:int, baseAlpha:Number,
-                                       rise:Number, life:Number)
-        {
-            _app = app;
-            _mode = mode;
-            _startX = startX;
-            _startY = startY;
-            _wx = wx;
-            _wy = wy;
-            _wz = wz;
-            _vehicleID = vehicleID;
-            _rise = isNaN(rise) ? DEFAULT_RISE : rise;
-            _lifeTime = isNaN(life) ? DEFAULT_LIFETIME : life;
-            if (_lifeTime <= 0.1) _lifeTime = DEFAULT_LIFETIME;
-            if (_rise <= 0.0) _rise = DEFAULT_RISE;
-
+            this.vehicleID = vehicleID;
             _bornAt = getTimer();
-            _baseAlpha = isNaN(baseAlpha) ? 1.0 : baseAlpha;
-
-            _dbg = new Shape();
-            _dbg.graphics.beginFill(0xFF00FF, 0.35);
-            _dbg.graphics.lineStyle(2, 0xFFFFFF, 1.0);
-            _dbg.graphics.drawRect(-48, -25, 96, 50);
-            _dbg.graphics.endFill();
-            addChild(_dbg);
+            _baseAlpha = baseAlpha;
 
             _tf = new TextField();
             _tf.autoSize = TextFieldAutoSize.CENTER;
@@ -102,72 +46,51 @@ package com.flyingdamage
             _tf.background = false;
             _tf.border = false;
             _tf.type = TextFieldType.DYNAMIC;
-            _tf.embedFonts = false;
-            _tf.defaultTextFormat = new TextFormat("Arial", fontSize, colorRGB, true);
+            _tf.defaultTextFormat = new TextFormat("$TitleFont", fontSize, colorRGB, true);
             _tf.text = String(damage);
-            _tf.x = -_tf.textWidth / 2.0 - 4.0;
-            _tf.y = -_tf.textHeight / 2.0 - 4.0;
-            _tf.filters = [ new GlowFilter(0x000000, 1.0, 4, 4, 4, 2) ];
+            _tf.x = -_tf.textWidth / 2.0;
+            _tf.y = -_tf.textHeight / 2.0;
+            _tf.filters = [ new GlowFilter(0x000000, 1.0, 3, 3, 3, 2) ];
 
             addChild(_tf);
             this.alpha = _baseAlpha;
-            this.visible = true;
-            this.x = _startX;
-            this.y = _startY;
-
-            log("FloatingNumber create mode=" + _mode + " vid=" + _vehicleID + " start=(" + _startX + "," + _startY + ") text=" + damage + " stageItemVisible=" + this.visible);
-            update();
+            this.visible = false; // shown once we have a valid position
         }
 
-        public function update():Boolean
+        /**
+         * pos: {x, y, ok} from Python, or null if unavailable this frame.
+         * Returns false when the animation is finished.
+         */
+        public function update(pos:Object):Boolean
         {
             var age:Number = (getTimer() - _bornAt) / 1000.0;
-            if (age >= _lifeTime)
+            if (age >= LIFETIME)
                 return false;
 
-            var progress:Number = age / _lifeTime;
+            var progress:Number = age / LIFETIME;
 
-            if (_mode == "vehicle" && !_failed)
+            // Base position = tank's current screen position (sticks to tank).
+            if (pos != null && pos.ok)
             {
-                var vpos:Object = _app.projectVehicle(_vehicleID, _rise * progress);
-                if (_projectLog < 8)
-                {
-                    _projectLog++;
-                    log("FloatingNumber project vehicle vid=" + _vehicleID + " ok=" + (vpos != null && vpos.ok) + " progress=" + progress + " pos=" + (vpos == null ? "null" : (vpos.x + "," + vpos.y)));
-                }
-                if (vpos != null && vpos.ok)
-                {
-                    this.x = Number(vpos.x);
-                    this.y = Number(vpos.y);
-                }
-                else
-                {
-                    // Do not hide/fail hard. Keep visible on fallback position so
-                    // we can distinguish projection failure from draw-layer failure.
-                    this.x = _startX;
-                    this.y = _startY - DEFAULT_RISE * progress;
-                }
-            }
-            else if (_mode == "world" && !_failed)
-            {
-                var pos:Object = _app.projectWorld(_wx, _wy + _rise * progress, _wz);
-                if (pos != null && pos.ok)
-                {
-                    this.x = Number(pos.x);
-                    this.y = Number(pos.y);
-                }
-                else
-                {
-                    this.x = _startX;
-                    this.y = _startY - DEFAULT_RISE * progress;
-                }
-            }
-            else
-            {
-                this.x = _startX;
-                this.y = _startY - _rise * progress;
+                _lastX = pos.x;
+                _lastY = pos.y;
+                _hasPos = true;
             }
 
+            if (!_hasPos)
+            {
+                // No position yet: stay hidden but keep the clock running.
+                this.visible = false;
+                return true;
+            }
+
+            this.visible = true;
+
+            // Rise upward over the animation (screen y decreases upward).
+            this.x = _lastX;
+            this.y = _lastY + ANCHOR_OFFSET_Y - RISE_PIXELS * progress;
+
+            // Fade out over the last part of the life.
             if (progress < FADE_START)
                 this.alpha = _baseAlpha;
             else
@@ -178,25 +101,12 @@ package com.flyingdamage
 
         public function dispose():void
         {
-            _app = null;
             if (_tf != null)
             {
                 if (_tf.parent != null)
                     _tf.parent.removeChild(_tf);
                 _tf = null;
             }
-            if (_dbg != null)
-            {
-                if (_dbg.parent != null)
-                    _dbg.parent.removeChild(_dbg);
-                _dbg = null;
-            }
-        }
-
-        private function log(msg:String):void
-        {
-            try { if (_app != null) _app.debugLog(msg); }
-            catch (e:Error) {}
         }
     }
 }
