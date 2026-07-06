@@ -62,7 +62,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\flex-sdk
-          key: flex-sdk-${{ env.FLEX_VERSION }}-v3
+          key: flex-sdk-${{ env.FLEX_VERSION }}-v4
 
       - name: Download Apache Flex SDK
         if: steps.cache-flex.outputs.cache-hit != 'true'
@@ -85,7 +85,6 @@ jobs:
             }
           }
           if (-not $ok) { throw 'Could not download Apache Flex SDK' }
-
           New-Item -ItemType Directory -Force -Path C:\flex-sdk | Out-Null
           Expand-Archive -Path flex-sdk.zip -DestinationPath C:\flex-sdk-temp -Force
           $items = Get-ChildItem C:\flex-sdk-temp
@@ -118,25 +117,28 @@ jobs:
           if (-not (Test-Path $mxmlc)) { throw "mxmlc not found: $mxmlc" }
           New-Item -ItemType Directory -Force -Path as3\bin | Out-Null
 
-          & $mxmlc `
-            -source-path+=as3\src_flash\src `
-            -library-path+=as3\libs\playerglobal.swc `
-            -external-library-path+=as3\libs\common-1.0-SNAPSHOT.swc `
-            -external-library-path+=as3\libs\common_i18n_library-1.0-SNAPSHOT.swc `
-            -external-library-path+=as3\libs\base_app-1.0-SNAPSHOT.swc `
-            -external-library-path+=as3\libs\gui_base-1.0-SNAPSHOT.swc `
-            -external-library-path+=as3\libs\gui_lobby-1.0-SNAPSHOT.swc `
-            -external-library-path+=as3\libs\gui_battle-1.0-SNAPSHOT.swc `
-            -external-library-path+=as3\libs\lobby.swc `
-            -external-library-path+=as3\libs\battle.swc `
-            -target-player=${{ env.FLASH_PLAYER_VERSION }} `
-            -swf-version=${{ env.SWF_VERSION }} `
-            -strict=true `
-            -optimize=true `
-            -warnings=true `
-            -output=as3\bin\FlyingDamageApp.swf `
-            -- as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as
+          $args = @(
+            '-source-path+=as3\src_flash\src',
+            '-library-path+=as3\libs\playerglobal.swc',
+            '-external-library-path+=as3\libs\common-1.0-SNAPSHOT.swc',
+            '-external-library-path+=as3\libs\common_i18n_library-1.0-SNAPSHOT.swc',
+            '-external-library-path+=as3\libs\base_app-1.0-SNAPSHOT.swc',
+            '-external-library-path+=as3\libs\gui_base-1.0-SNAPSHOT.swc',
+            '-external-library-path+=as3\libs\gui_lobby-1.0-SNAPSHOT.swc',
+            '-external-library-path+=as3\libs\gui_battle-1.0-SNAPSHOT.swc',
+            '-external-library-path+=as3\libs\lobby.swc',
+            '-external-library-path+=as3\libs\battle.swc',
+            '-target-player=${{ env.FLASH_PLAYER_VERSION }}',
+            '-swf-version=${{ env.SWF_VERSION }}',
+            '-strict=true',
+            '-optimize=true',
+            '-warnings=true',
+            '-output=as3\bin\FlyingDamageApp.swf',
+            'as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as'
+          )
 
+          & $mxmlc @args
+          if ($LASTEXITCODE -ne 0) { throw "mxmlc failed with exit code $LASTEXITCODE" }
           if (-not (Test-Path as3\bin\FlyingDamageApp.swf)) { throw 'SWF was not created' }
 
       - name: Copy SWF into resources
