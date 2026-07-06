@@ -10,14 +10,14 @@ package com.flyingdamage
      * FlyingDamageApp -- ExternalFlashComponent.
      *
      * Important Scaleform quirk: GUI.Flash is centered by its SWF dimensions.
-     * Changing Python-side position/size/anchors is unreliable, so the root
-     * sprite must shift itself to make AS3 coordinates match screen pixels.
+     * The proven workaround used by DistanceMarker is a small 800x600 SWF and
+     * root correction: root.x = 400 - screenWidth / 2, root.y = 300 - screenHeight / 2.
      */
     public class FlyingDamageApp extends Sprite
     {
-        // Must match workflow mxmlc -default-size=3840,2160.
-        private static const SWF_HALF_WIDTH:Number = 1920.0;
-        private static const SWF_HALF_HEIGHT:Number = 1080.0;
+        // Must match workflow mxmlc -default-size=800,600.
+        private static const SWF_HALF_WIDTH:Number = 400.0;
+        private static const SWF_HALF_HEIGHT:Number = 300.0;
 
         public var py_getScreenPos:Function = null;
         public var py_projectWorld:Function = null;
@@ -64,8 +64,6 @@ package com.flyingdamage
             if (!_selfTestShown)
             {
                 _selfTestShown = true;
-                // Internal AS3 self-test. After root-position correction this
-                // should appear near the top-left of the actual screen.
                 as_showDamageScreen(120, 120, 8888, 0x00FFFF, 42, 1.0, 80, 4.0);
             }
         }
