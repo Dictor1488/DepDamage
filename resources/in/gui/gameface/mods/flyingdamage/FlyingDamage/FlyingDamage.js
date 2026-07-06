@@ -5,10 +5,7 @@
     var root = document.getElementById('fd-root');
     var hud = document.getElementById('fd-hud');
     var lastPayload = '';
-    var pollTimer = null;
-    var lastEventId = 0;
-    var tickCount = 0;
-    var bootShown = false;
+    var started = false;
 
     function log(msg) {
         try { console.warn('[FlyingDamageGF_JS] ' + msg); } catch (e) {}
@@ -17,10 +14,6 @@
     function num(v, d) {
         v = Number(v);
         return isNaN(v) ? d : v;
-    }
-
-    function clamp(v, min, max) {
-        return Math.max(min, Math.min(max, v));
     }
 
     function colorFromInt(v) {
@@ -54,35 +47,33 @@
         if (!hud && root) {
             hud = svgEl('svg', {
                 id: 'fd-hud',
-                width: '2560',
-                height: '1369',
-                viewBox: '0 0 2560 1369'
+                width: '220',
+                height: '120',
+                viewBox: '0 0 220 120'
             }, root);
         }
         return !!hud;
     }
 
-    function viewportW() {
-        return Math.max(1, window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth || 256);
-    }
-
-    function viewportH() {
-        return Math.max(1, window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight || 256);
+    function ready() {
+        try {
+            if (window.model && typeof window.model.onReady === 'function') window.model.onReady();
+            else if (window.viewModel && typeof window.viewModel.onReady === 'function') window.viewModel.onReady();
+        } catch (e) {
+            log('onReady failed ' + e);
+        }
     }
 
     function addDamage(ev) {
         if (!ensureHud() || !ev) return;
 
-        var vw = viewportW();
-        var vh = viewportH();
-        var sw = Math.max(1, num(ev.sw, 2560));
-        var sh = Math.max(1, num(ev.sh, 1369));
-        var x = clamp(num(ev.x, sw * 0.5), -2000, sw + 2000);
-        var y = clamp(num(ev.y, sh * 0.5), -2000, sh + 2000);
+        var x = num(ev.x, 110);
+        var y = num(ev.y, 66);
         var textValue = String(Math.round(num(ev.dmg, 0)));
-        var size = Math.max(24, num(ev.size, 36));
+        var size = Math.max(24, num(ev.size, 38));
         var life = Math.max(0.8, num(ev.life, 1.6));
         var color = colorFromInt(ev.color);
+        var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
 
         var g = svgEl('g', { transform: 'translate(' + x + ' ' + y + ')' }, hud);
         var shadow = svgEl('text', {
@@ -99,18 +90,18 @@
             y: '0',
             fill: color,
             'font-size': String(size),
-            opacity: String(Math.max(0.2, Math.min(1, num(ev.alpha, 1))))
+            opacity: String(alpha)
         }, g);
         main.textContent = textValue;
 
-        log('draw-svg dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh + ' screen=' + sw + 'x' + sh);
+        log('draw-popup-svg dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight);
 
         var start = Date.now();
         function anim() {
             var t = Math.min(1, (Date.now() - start) / (life * 1000));
-            var dy = -72 * t;
-            var sc = 1 + 0.04 * (1 - Math.abs(t * 2 - 1));
-            var op = t < 0.72 ? 1 : Math.max(0, 1 - (t - 0.72) / 0.28);
+            var dy = -58 * t;
+            var sc = 1 + 0.08 * (1 - Math.abs(t * 2 - 1));
+            var op = t < 0.72 ? alpha : Math.max(0, alpha * (1 - (t - 0.72) / 0.28));
             g.setAttribute('transform', 'translate(' + x + ' ' + (y + dy) + ') scale(' + sc + ')');
             main.setAttribute('opacity', String(op));
             shadow.setAttribute('opacity', String(op * 0.65));
@@ -118,12 +109,6 @@
             else if (g && g.parentNode) g.parentNode.removeChild(g);
         }
         window.requestAnimationFrame(anim);
-    }
-
-    function showBootMarker() {
-        if (bootShown) return;
-        bootShown = true;
-        addDamage({ id: -1, x: 1280, y: 180, sw: 2560, sh: 1369, dmg: 9999, color: 0x66FF66, size: 54, alpha: 1, life: 8.0 });
     }
 
     function getRawPayload() {
@@ -137,7 +122,6 @@
                 if (typeof window.viewModel.getPayload === 'function') raw = window.viewModel.getPayload();
                 else if (window.viewModel.payload !== undefined) raw = window.viewModel.payload;
             }
-            if ((!raw || raw === '{}') && window.__payload !== undefined) raw = window.__payload;
         } catch (e) {
             log('payload read exception ' + e);
         }
@@ -145,54 +129,36 @@
     }
 
     function readPayload() {
-        tickCount++;
         var raw = getRawPayload();
-        if (tickCount === 1 || tickCount === 60 || tickCount === 180) {
-            log('tick=' + tickCount + ' hasModel=' + !!window.model + ' hasViewModel=' + !!window.viewModel + ' rawLen=' + (raw ? raw.length : 0));
-        }
         if (!raw || raw === lastPayload) return;
         lastPayload = raw;
-
         var payload = null;
         try { payload = JSON.parse(raw); } catch (e) {
             log('JSON parse failed raw=' + raw.substr(0, 120));
             return;
         }
-        if (!payload) return;
-
-        var events = payload.events || [];
-        log('payload seq=' + payload.seq + ' events=' + events.length);
-        for (var i = 0; i < events.length; i++) {
-            var ev = events[i];
-            var id = Math.round(num(ev.id, 0));
-            if (id && id <= lastEventId) continue;
-            if (id > lastEventId) lastEventId = id;
-            addDamage(ev);
-        }
-    }
-
-    function tick() {
-        readPayload();
+        var events = payload && payload.events ? payload.events : [];
+        log('payload-popup seq=' + payload.seq + ' events=' + events.length);
+        for (var i = 0; i < events.length; i++) addDamage(events[i]);
     }
 
     function initialize() {
+        if (started) return;
+        started = true;
         ensureHud();
-        log('initialize-svg view=' + viewportW() + 'x' + viewportH() + ' hud=' + !!hud);
-        showBootMarker();
-        tick();
-        window.setTimeout(tick, 50);
-        window.setTimeout(tick, 150);
-        window.setTimeout(tick, 500);
-        if (!pollTimer) pollTimer = window.setInterval(tick, 33);
+        log('initialize-popup-svg view=' + window.innerWidth + 'x' + window.innerHeight + ' hud=' + !!hud);
+        ready();
+        readPayload();
+        window.setTimeout(readPayload, 50);
+        window.setTimeout(readPayload, 150);
+        window.setTimeout(readPayload, 500);
         try {
             if (window.engine) {
-                window.engine.on('viewEnv.onDataChanged', tick);
-                window.engine.on('self.onDataUpdated', tick);
+                window.engine.on('viewEnv.onDataChanged', readPayload);
+                window.engine.on('self.onDataUpdated', readPayload);
             }
         } catch (e) {}
     }
-
-    window.__fdShowDamage = addDamage;
 
     if (window.engine && window.engine.whenReady) {
         var domReady = window.isDomBuilt ? Promise.resolve() : new Promise(function (resolve) {
