@@ -67,7 +67,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\flex-sdk
-          key: flex-sdk-${{ env.FLEX_VERSION }}-v6-800x600
+          key: flex-sdk-${{ env.FLEX_VERSION }}-v7-fullsize-no-root-shift
 
       - name: Download Apache Flex SDK
         if: steps.cache-flex.outputs.cache-hit != 'true'
@@ -135,7 +135,7 @@ jobs:
             '-external-library-path+=as3\libs\battle.swc',
             '-target-player=${{ env.FLASH_PLAYER_VERSION }}',
             '-swf-version=${{ env.SWF_VERSION }}',
-            '-default-size=800,600',
+            '-default-size=3840,2160',
             '-strict=true',
             '-optimize=true',
             '-warnings=true',
