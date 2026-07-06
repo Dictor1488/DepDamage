@@ -21,7 +21,7 @@ package com.flyingdamage
 
         public var py_getScreenPos:Function = null;
         public var py_projectWorld:Function = null;
-        public var py_pullDamage:Function = null;
+        public var py_pullDamageText:Function = null;
         public var py_log:Function = null;
 
         private var _layer:DamageLayer = null;
@@ -29,6 +29,7 @@ package com.flyingdamage
         private var _debugShown:int = 0;
         private var _selfTestShown:Boolean = false;
         private var _positionLogged:Boolean = false;
+        private var _pullLogged:int = 0;
 
         public function FlyingDamageApp()
         {
@@ -59,12 +60,13 @@ package com.flyingdamage
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
-            log("as_populate (timer started)");
+            log("as_populate (timer started, polling queue)");
 
             if (!_selfTestShown)
             {
                 _selfTestShown = true;
-                as_showDamageScreen(120, 120, 8888, 0x00FFFF, 42, 1.0, 80, 4.0);
+                // Direct AS3 self-test. If this is visible, AS3 rendering is OK.
+                as_showDamageScreen(400, 300, 8888, 0x00FFFF, 42, 1.0, 80, 4.0);
             }
         }
 
@@ -79,7 +81,7 @@ package com.flyingdamage
             {
                 _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 16)
+                if (_debugShown <= 24)
                     log("as_showDamageScreen d=" + damage + " x=" + x + " y=" + y + " root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
@@ -101,7 +103,7 @@ package com.flyingdamage
                 _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
                                        colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 16)
+                if (_debugShown <= 24)
                     log("as_showDamageWorld d=" + damage + " x=" + fallbackX + " y=" + fallbackY + " root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
@@ -132,7 +134,7 @@ package com.flyingdamage
             }
             py_getScreenPos = null;
             py_projectWorld = null;
-            py_pullDamage = null;
+            py_pullDamageText = null;
             py_log = null;
         }
 
@@ -176,7 +178,63 @@ package com.flyingdamage
             if (_layer == null)
                 return;
             _updateAppPosition();
+            _pullDamageQueue();
             _layer.tick();
+        }
+
+        private function _pullDamageQueue():void
+        {
+            if (py_pullDamageText == null)
+                return;
+
+            var data:String = "";
+            try { data = String(py_pullDamageText()); }
+            catch (e:Error)
+            {
+                log("py_pullDamageText error: " + e.message);
+                return;
+            }
+
+            if (data == null || data.length == 0)
+                return;
+
+            if (_pullLogged < 20)
+            {
+                _pullLogged++;
+                log("pulled damage data: " + data);
+            }
+
+            var rows:Array = data.split("\n");
+            for each (var row:String in rows)
+            {
+                _parseDamageRow(row);
+            }
+        }
+
+        private function _parseDamageRow(row:String):void
+        {
+            if (row == null || row.length == 0)
+                return;
+
+            var p:Array = row.split("|");
+            try
+            {
+                if (p[0] == "S" && p.length >= 9)
+                {
+                    as_showDamageScreen(Number(p[1]), Number(p[2]), int(p[3]), uint(p[4]),
+                                        int(p[5]), Number(p[6]), Number(p[7]), Number(p[8]));
+                }
+                else if (p[0] == "W" && p.length >= 12)
+                {
+                    as_showDamageWorld(Number(p[1]), Number(p[2]), Number(p[3]),
+                                       Number(p[4]), Number(p[5]), int(p[6]), uint(p[7]),
+                                       int(p[8]), Number(p[9]), Number(p[10]), Number(p[11]));
+                }
+            }
+            catch (e:Error)
+            {
+                log("parse damage row error: " + e.message + " row=" + row);
+            }
         }
 
         private function log(msg:String):void
