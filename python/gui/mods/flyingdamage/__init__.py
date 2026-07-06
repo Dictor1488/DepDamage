@@ -85,14 +85,16 @@ if _OPENWG_OK:
     class FlyingDamageWindow(WindowImpl):
 
         def __init__(self):
-            # Use the same simple WindowImpl path as the working CustomHPBarGF.
-            # It loads on WULF layer 7 in this client; the previous fullscreen
-            # fallback went to layer 8 and JS drew numbers but the overlay was not visible.
+            flags = WindowFlags.WINDOW
+            try:
+                flags = flags | WindowFlags.WINDOW_FULLSCREEN
+            except Exception:
+                pass
             super(FlyingDamageWindow, self).__init__(
-                wndFlags=WindowFlags.WINDOW,
+                wndFlags=flags,
                 content=FlyingDamageView()
             )
-            logger.info('[FlyingDamageGF] CustomHPBar-style WindowImpl layer7 path')
+            logger.info('[FlyingDamageGF] fullscreen WindowImpl flags=%s visibility test path', flags)
 else:
     FlyingDamageWindow = None
 
