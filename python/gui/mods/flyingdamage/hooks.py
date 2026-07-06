@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # hooks.py  --  Python 2.7
 # Damage from health marker hook. Feed Gameface renderer with vehicle id;
-# controller projects vehicle to screen pixels and pushes DOM damage numbers.
+# controller projects vehicle marker to screen pixels and creates popup windows.
 
 import logging
 
@@ -15,10 +15,12 @@ from .settings.config import g_config
 logger = logging.getLogger(__name__)
 
 _ANCHOR_UP = 4.5
+_MARKER_Y_OFFSET = 34.0
 _MERGE_WINDOW = 0.09
 _ctrlRef = [None]
 _pending = {}
 _callbacks = {}
+_vehicleMarkerClass = [None]
 
 
 def setView(controller):
@@ -59,7 +61,31 @@ def installHooks():
             pass
         return result
 
-    logger.info('[FlyingDamageGF] hooks installed attacker tracking')
+    try:
+        from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
+
+        @override(VehicleMarkerPlugin, 'start')
+        def _markerStart(base, self):
+            result = base(self)
+            try:
+                _vehicleMarkerClass[0] = getattr(self, '_clazz', None)
+                logger.info('[FlyingDamageGF] VehicleMarkerPlugin.start captured clazz=%s', _vehicleMarkerClass[0] is not None)
+            except Exception:
+                logger.error('[FlyingDamageGF] capture marker clazz failed', exc_info=True)
+            return result
+
+        @override(VehicleMarkerPlugin, 'stop')
+        def _markerStop(base, self):
+            result = base(self)
+            try:
+                _vehicleMarkerClass[0] = None
+            except Exception:
+                pass
+            return result
+    except Exception:
+        logger.error('[FlyingDamageGF] VehicleMarkerPlugin hook failed', exc_info=True)
+
+    logger.info('[FlyingDamageGF] hooks installed attacker tracking + marker provider')
 
 
 _lastAttacker = {}
@@ -151,12 +177,12 @@ def projectVehicleScreen(vid):
                 _projCallLog[0] += 1
                 logger.info('[FlyingDamageGF] project vid=%s failed res=None', vid)
             return {'x': 0.0, 'y': 0.0, 'ok': False}
-        sx, sy, visible = res
+        sx, sy, visible, source = res
         if sx is None or sy is None:
             return {'x': 0.0, 'y': 0.0, 'ok': False}
-        if _projCallLog[0] < 80:
+        if _projCallLog[0] < 100:
             _projCallLog[0] += 1
-            logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s', vid, float(sx), float(sy), visible)
+            logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s source=%s', vid, float(sx), float(sy), visible, source)
         return {'x': float(sx), 'y': float(sy), 'ok': True}
     except Exception:
         logger.error('[FlyingDamageGF] projectVehicleScreen failed vid=%s', vid, exc_info=True)
@@ -209,19 +235,48 @@ def _buildVP():
         return None
 
 
-def _project(vehicle):
-    vp = _buildVP()
-    if vp is None:
+def _markerWorldPos(vehicle):
+    clazz = _vehicleMarkerClass[0]
+    if clazz is None:
         return None
+    try:
+        provider = clazz.fetchMatrixProvider(vehicle)
+        if provider is None:
+            return None
+        tmp = Math.Matrix()
+        tmp.set(provider)
+        return tmp.translation
+    except Exception:
+        return None
+
+
+def _fallbackWorldPos(vehicle):
     try:
         tmp = Math.Matrix()
         tmp.set(vehicle.matrix)
         pos = tmp.translation
+        return Math.Vector3(pos.x, pos.y + _ANCHOR_UP, pos.z)
     except Exception:
         pos = getattr(vehicle, 'position', None)
         if pos is None:
             return None
-    v = Math.Vector4(pos.x, pos.y + _ANCHOR_UP, pos.z, 1.0)
+        return Math.Vector3(pos.x, pos.y + _ANCHOR_UP, pos.z)
+
+
+def _project(vehicle):
+    vp = _buildVP()
+    if vp is None:
+        return None
+
+    source = 'marker'
+    pos = _markerWorldPos(vehicle)
+    if pos is None:
+        source = 'fallback'
+        pos = _fallbackWorldPos(vehicle)
+        if pos is None:
+            return None
+
+    v = Math.Vector4(pos.x, pos.y, pos.z, 1.0)
     v = vp.applyV4Point(v)
     w = v.w
     if w <= 0:
@@ -230,4 +285,8 @@ def _project(vehicle):
     cy = v.y / w
     visible = -1 <= cx <= 1 and -1 <= cy <= 1
     sw, sh = GUI.screenResolution()[:2]
-    return ((0.5 + 0.5 * cx) * sw, (0.5 - 0.5 * cy) * sh, visible)
+    x = (0.5 + 0.5 * cx) * sw
+    y = (0.5 - 0.5 * cy) * sh
+    if source == 'marker':
+        y += _MARKER_Y_OFFSET
+    return (x, y, visible, source)
