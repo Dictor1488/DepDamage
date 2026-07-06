@@ -9,9 +9,8 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * On the current WoT client stage.stageWidth/stage.stageHeight already match
-     * the real screen size. Root shifting makes objects disappear, so this build
-     * uses native stage/screen coordinates directly.
+     * Resolution independent build: Python sends normalized screen coordinates
+     * 0..1. AS3 maps them to the current stage size.
      */
     public class FlyingDamageApp extends Sprite
     {
@@ -59,14 +58,12 @@ package com.flyingdamage
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
-            log("as_populate (timer started, no root shift, polling queue)");
+            log("as_populate (timer started, normalized coordinates)");
 
             if (!_selfTestShown)
             {
                 _selfTestShown = true;
-                as_showDamageScreen(stage != null ? stage.stageWidth / 2.0 : 1280,
-                                    stage != null ? stage.stageHeight / 2.0 : 684,
-                                    8888, 0x00FFFF, 42, 1.0, 80, 4.0);
+                as_showDamageNormalized(0.5, 0.5, 8888, 0x00FFFF, 42, 1.0, 0.075, 4.0);
             }
         }
 
@@ -75,23 +72,47 @@ package com.flyingdamage
                                             alpha:Number, rise:Number,
                                             life:Number):void
         {
+            // Backward-compatible entry point: if x/y are 0..1, treat them as
+            // normalized. Otherwise use raw pixels.
+            if (_isNormalized(x, y))
+                as_showDamageNormalized(x, y, damage, colorRGB, fontSize, alpha, rise, life);
+            else
+                _showDamagePixels(x, y, damage, colorRGB, fontSize, alpha, rise, life, "screen");
+        }
+
+        public function as_showDamageNormalized(nx:Number, ny:Number, damage:int,
+                                                colorRGB:uint, fontSize:int,
+                                                alpha:Number, riseNorm:Number,
+                                                life:Number):void
+        {
+            var px:Number = _stageW() * nx;
+            var py:Number = _stageH() * ny;
+            var risePx:Number = _stageH() * riseNorm;
+            _showDamagePixels(px, py, damage, colorRGB, fontSize, alpha, risePx, life, "norm");
+        }
+
+        private function _showDamagePixels(px:Number, py:Number, damage:int,
+                                           colorRGB:uint, fontSize:int,
+                                           alpha:Number, rise:Number,
+                                           life:Number, mode:String):void
+        {
             _ensureLayer();
             _updateAppPosition();
             try
             {
-                _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
+                _layer.showScreenDamage(px, py, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 30)
-                    log("as_showDamageScreen d=" + damage + " screen=(" + x + "," + y + ") root=(" + this.x + "," + this.y + ")");
+                if (_debugShown <= 40)
+                    log("showDamage " + mode + " d=" + damage + " px=(" + px + "," + py + ") stage=(" + _stageW() + "," + _stageH() + ") root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
-                log("as_showDamageScreen error: " + e.message);
+                log("showDamage error: " + e.message);
             }
         }
 
         public function as_showDamageWorld(wx:Number, wy:Number, wz:Number,
-                                           fallbackX:Number, fallbackY:Number,
+                                           fallbackNX:Number, fallbackNY:Number,
                                            damage:int, colorRGB:uint,
                                            fontSize:int, alpha:Number,
                                            rise:Number, life:Number):void
@@ -100,11 +121,11 @@ package com.flyingdamage
             _updateAppPosition();
             try
             {
-                _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
-                                       colorRGB, fontSize, alpha, rise, life);
+                _layer.showWorldDamage(wx, wy, wz, _stageW() * fallbackNX, _stageH() * fallbackNY,
+                                       damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 30)
-                    log("as_showDamageWorld d=" + damage + " screen=(" + fallbackX + "," + fallbackY + ") root=(" + this.x + "," + this.y + ")");
+                if (_debugShown <= 40)
+                    log("as_showDamageWorld d=" + damage + " norm=(" + fallbackNX + "," + fallbackNY + ") stage=(" + _stageW() + "," + _stageH() + ")");
             }
             catch (e:Error)
             {
@@ -142,7 +163,16 @@ package com.flyingdamage
         {
             if (py_projectWorld == null)
                 return null;
-            try { return py_projectWorld(wx, wy, wz); }
+            try
+            {
+                var pos:Object = py_projectWorld(wx, wy, wz);
+                if (pos != null && pos.ok && pos.normalized)
+                {
+                    pos.x = _stageW() * Number(pos.x);
+                    pos.y = _stageH() * Number(pos.y);
+                }
+                return pos;
+            }
             catch (e:Error) {}
             return null;
         }
@@ -163,11 +193,23 @@ package com.flyingdamage
             if (!_positionLogged)
             {
                 _positionLogged = true;
-                if (stage != null)
-                    log("root forced to 0,0 for screen=" + stage.stageWidth + "x" + stage.stageHeight);
-                else
-                    log("root forced to 0,0");
+                log("root 0,0; normalized render; stage=" + _stageW() + "x" + _stageH());
             }
+        }
+
+        private function _stageW():Number
+        {
+            return stage != null && stage.stageWidth > 0 ? stage.stageWidth : 1920;
+        }
+
+        private function _stageH():Number
+        {
+            return stage != null && stage.stageHeight > 0 ? stage.stageHeight : 1080;
+        }
+
+        private function _isNormalized(x:Number, y:Number):Boolean
+        {
+            return x >= -0.25 && x <= 1.25 && y >= -0.25 && y <= 1.25;
         }
 
         private function onTick(e:TimerEvent):void
@@ -221,7 +263,12 @@ package com.flyingdamage
             var p:Array = row.split("|");
             try
             {
-                if (p[0] == "S" && p.length >= 9)
+                if (p[0] == "N" && p.length >= 9)
+                {
+                    as_showDamageNormalized(Number(p[1]), Number(p[2]), int(p[3]), uint(p[4]),
+                                            int(p[5]), Number(p[6]), Number(p[7]), Number(p[8]));
+                }
+                else if (p[0] == "S" && p.length >= 9)
                 {
                     as_showDamageScreen(Number(p[1]), Number(p[2]), int(p[3]), uint(p[4]),
                                         int(p[5]), Number(p[6]), Number(p[7]), Number(p[8]));
