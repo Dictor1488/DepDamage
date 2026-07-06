@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene
-# (same mechanism as DistanceMarker, which reliably loads and runs its SWF).
-# Feeds floating damage numbers that stick to tanks.
+# Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene.
+# In this WoT build only as_populate reliably reaches AS3, so Python drives the
+# renderer by repeatedly calling as_populate(); the SWF treats it as a tick.
 
 import logging
 
@@ -33,8 +33,7 @@ except Exception:
 
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'com.flyingdamage.FlyingDamageApp'
-_bridgeLog = [False]
-_damageQueue = [[]]   # list of {vid, dmg, color, size, alpha} pending for SWF
+_damageQueue = [[]]
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
@@ -50,12 +49,12 @@ class _FlyingDamageMeta(BaseDAAPIModule):
             return None
 
     def py_pullDamage(self):
-        # Return and clear the queue of newly-dealt damage.
         try:
             q = _damageQueue[0]
             if not q:
                 return []
             _damageQueue[0] = []
+            logger.info('[FlyingDamage] py_pullDamage returns %d item(s)', len(q))
             return q
         except Exception:
             return []
@@ -63,21 +62,6 @@ class _FlyingDamageMeta(BaseDAAPIModule):
     def as_populate(self):
         if self._isDAAPIInited():
             self.flashObject.as_populate()
-
-    def as_update(self):
-        try:
-            fo = self.flashObject
-            if fo is not None:
-                fo.as_update()
-        except Exception:
-            logger.error('[FlyingDamage] as_update error', exc_info=True)
-
-    def as_tick(self):
-        try:
-            if self._isDAAPIInited():
-                self.flashObject.as_tick()
-        except Exception:
-            pass
 
     def as_clear(self):
         if self._isDAAPIInited():
@@ -91,10 +75,6 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
         self.createExternalComponent()
         self._configureApp()
-        # Wire callbacks. active(True) is NOT called here — DistanceMarker calls
-        # it externally AFTER construction (from the start hook). Activating
-        # inside the constructor, before the object is fully wired, breaks the
-        # render/tick activation.
         try:
             self.flashObject.py_log = self.py_log
             self.flashObject.py_getScreenPos = self.py_getScreenPos
@@ -109,32 +89,23 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             logger.info('[FlyingDamage] active(True) called')
         except Exception:
             logger.error('[FlyingDamage] active(True) failed', exc_info=True)
-        # SYNC TEST: call as_update once synchronously here (same context in
-        # which DistanceMarker calls as_applyConfig successfully). If this
-        # reaches the SWF, push works synchronously and we drive from a sync
-        # source; if not, the bridge is fully one-way for us.
-        try:
-            if self._isDAAPIInited():
-                self.flashObject.as_update()
-                logger.info('[FlyingDamage] SYNC as_update called in activate')
-        except Exception:
-            logger.error('[FlyingDamage] sync as_update failed', exc_info=True)
-        self._updRunning = True
-        self._pumpUpdate()
+        self._popRunning = True
+        self._popCount = 0
+        self._pumpPopulate()
 
-    def _pumpUpdate(self):
-        if not getattr(self, '_updRunning', False):
+    def _pumpPopulate(self):
+        if not getattr(self, '_popRunning', False):
             return
-        self._updCount = getattr(self, '_updCount', 0) + 1
-        if self._updCount <= 3 or self._updCount % 300 == 0:
-            logger.info('[FlyingDamage] pumpUpdate #%d DAAPIInited=%s flashObj=%s',
-                        self._updCount, self._isDAAPIInited(),
-                        self.flashObject is not None)
+        self._popCount += 1
+        if self._popCount <= 5 or self._popCount % 300 == 0:
+            logger.info('[FlyingDamage] pumpPopulate #%d DAAPIInited=%s flashObj=%s queue=%d',
+                        self._popCount, self._isDAAPIInited(),
+                        self.flashObject is not None, len(_damageQueue[0]))
         try:
-            self.as_update()
+            self.as_populate()
         except Exception:
-            pass
-        BigWorld.callback(0.016, self._pumpUpdate)
+            logger.error('[FlyingDamage] pumpPopulate failed', exc_info=True)
+        BigWorld.callback(0.016, self._pumpPopulate)
 
     def _configureApp(self):
         try:
@@ -149,20 +120,16 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             logger.error('[FlyingDamage] configureApp partial', exc_info=True)
 
     def close(self):
-        self._tickRunning = False
-        self._updRunning = False
+        self._popRunning = False
         try:
-            self.as_dispose()
+            if self._isDAAPIInited():
+                self.flashObject.as_dispose()
         except Exception:
             pass
         try:
             super(FlyingDamageFlash, self).close()
         except Exception:
             logger.info('[FlyingDamage] flash close (non-fatal)')
-
-    def as_dispose(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_dispose()
 
 
 class Controller(object):
@@ -171,6 +138,7 @@ class Controller(object):
         self._enabled = True
         self._battleMode = False
         self._flash = None
+        self._pushLog = 0
 
     def init(self):
         logger.info('[FlyingDamage] controller.init begin')
@@ -218,8 +186,6 @@ class Controller(object):
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def onMarkerPluginStart(self):
-        # Called from VehicleMarkerPlugin.start hook — the correct lifecycle
-        # point to create+activate the flash (matches DistanceMarker).
         logger.info('[FlyingDamage] marker plugin start -> creating flash')
         self._createFlash()
 
@@ -237,8 +203,6 @@ class Controller(object):
             return
         try:
             self._flash = FlyingDamageFlash()
-            # Activate AFTER construction — exactly as DistanceMarker does:
-            #   g_distanceMarkerFlash = DistanceMarkerFlash(...); .active(True)
             self._flash.activate()
             from .hooks import setView
             setView(self)
@@ -277,7 +241,6 @@ class Controller(object):
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         if self._flash is None:
             return
-        # Enqueue; the SWF pulls this via py_pullDamage() each frame.
         _damageQueue[0].append({
             'vid': str(int(vehicleID)),
             'dmg': int(damage),
@@ -285,6 +248,10 @@ class Controller(object):
             'size': int(fontSize),
             'alpha': float(alpha),
         })
+        if self._pushLog < 80:
+            self._pushLog += 1
+            logger.info('[FlyingDamage] queued visible vehicle damage vid=%s dmg=%s queue=%d',
+                        int(vehicleID), int(damage), len(_damageQueue[0]))
 
 
 g_controller = Controller()
