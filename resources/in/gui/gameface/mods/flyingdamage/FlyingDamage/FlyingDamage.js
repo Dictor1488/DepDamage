@@ -66,6 +66,10 @@
         return Math.max(1, window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight || 256);
     }
 
+    function isTinyView(vw, vh) {
+        return vw <= 320 && vh <= 320;
+    }
+
     function addDamage(ev) {
         if (!ensureRoot() || !ev) return;
 
@@ -73,12 +77,19 @@
         var vh = viewportH();
         var sw = Math.max(1, num(ev.sw, 2560));
         var sh = Math.max(1, num(ev.sh, 1369));
+        var tiny = isTinyView(vw, vh);
 
-        // Layer 7 Gameface windows in this client can report only 256x256,
-        // but Python gives real screen coordinates. Keep those coordinates;
-        // do not scale them down to 256x256.
-        var x = clamp(num(ev.x, sw * 0.5), -2000, sw + 2000);
-        var y = clamp(num(ev.y, sh * 0.5), -2000, sh + 2000);
+        var x;
+        var y;
+        if (tiny && !ev.noScale) {
+            // Visibility fallback: if Gameface clamps the view to 256x256,
+            // map real screen coordinates into that visible square.
+            x = clamp(num(ev.x, sw * 0.5) / sw * vw, 8, vw - 8);
+            y = clamp(num(ev.y, sh * 0.5) / sh * vh, 8, vh - 8);
+        } else {
+            x = clamp(num(ev.x, sw * 0.5), -2000, sw + 2000);
+            y = clamp(num(ev.y, sh * 0.5), -2000, sh + 2000);
+        }
 
         var el = document.createElement('div');
         el.className = 'fd-damage';
@@ -86,13 +97,13 @@
         el.style.left = x + 'px';
         el.style.top = y + 'px';
         el.style.color = colorFromInt(ev.color);
-        el.style.fontSize = Math.max(24, num(ev.size, 34)) + 'px';
+        el.style.fontSize = Math.max(tiny ? 34 : 24, num(ev.size, tiny ? 42 : 34)) + 'px';
         el.style.opacity = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
         el.style.animationDuration = Math.max(0.8, num(ev.life, 1.6)) + 's';
         el.style.zIndex = '2147483647';
         root.appendChild(el);
 
-        log('draw dmg=' + el.textContent + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh + ' screen=' + sw + 'x' + sh);
+        log('draw dmg=' + el.textContent + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh + ' screen=' + sw + 'x' + sh + ' tiny=' + tiny);
 
         window.setTimeout(function () {
             if (el && el.parentNode) el.parentNode.removeChild(el);
@@ -102,7 +113,10 @@
     function showBootMarker() {
         if (bootShown) return;
         bootShown = true;
-        addDamage({ id: -1, x: 1280, y: 180, sw: 2560, sh: 1369, dmg: 9999, color: 0x66FF66, size: 54, alpha: 1, life: 8.0 });
+        // Always visible if the layer renders at all: center of the 256x256 fallback.
+        addDamage({ id: -2, x: 128, y: 128, sw: 256, sh: 256, dmg: 7777, color: 0x66FF66, size: 48, alpha: 1, life: 12.0, noScale: true });
+        // Full-screen coordinate test.
+        addDamage({ id: -1, x: 1280, y: 180, sw: 2560, sh: 1369, dmg: 9999, color: 0xFFFF33, size: 54, alpha: 1, life: 8.0 });
     }
 
     function getRawPayload() {
