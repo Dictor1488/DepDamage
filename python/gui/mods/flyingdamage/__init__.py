@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
 # Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene.
-# Damage is pushed directly into AS3 with a pull queue as fallback.
+# Damage is pushed into AS3 using primitive arguments; Python dict/Object passing
+# is deliberately avoided because it was not reliable on the current client.
 
 import logging
 
@@ -32,8 +33,8 @@ except Exception:
 
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'FlyingDamageApp'
-_damageQueue = [[]]
 _pushLog = [0]
+_testLog = [False]
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
@@ -55,16 +56,6 @@ class _FlyingDamageMeta(BaseDAAPIModule):
         except Exception:
             return {'x': 0.0, 'y': 0.0, 'ok': False}
 
-    def py_pullDamage(self):
-        try:
-            q = _damageQueue[0]
-            if not q:
-                return []
-            _damageQueue[0] = []
-            return q
-        except Exception:
-            return []
-
     def as_populate(self):
         if self._isDAAPIInited():
             self.flashObject.as_populate()
@@ -73,9 +64,15 @@ class _FlyingDamageMeta(BaseDAAPIModule):
         if self._isDAAPIInited():
             self.flashObject.as_clear()
 
-    def as_showDamage(self, data):
+    def as_showDamageScreen(self, x, y, damage, colorRGB, fontSize, alpha, rise, life):
         if self._isDAAPIInited():
-            self.flashObject.as_showDamage(data)
+            self.flashObject.as_showDamageScreen(x, y, damage, colorRGB, fontSize, alpha, rise, life)
+
+    def as_showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY,
+                           damage, colorRGB, fontSize, alpha, rise, life):
+        if self._isDAAPIInited():
+            self.flashObject.as_showDamageWorld(wx, wy, wz, fallbackX, fallbackY,
+                                                damage, colorRGB, fontSize, alpha, rise, life)
 
 
 class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
@@ -89,7 +86,6 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             self.flashObject.py_log = self.py_log
             self.flashObject.py_getScreenPos = self.py_getScreenPos
             self.flashObject.py_projectWorld = self.py_projectWorld
-            self.flashObject.py_pullDamage = self.py_pullDamage
         except Exception:
             logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
         self.as_populate()
@@ -101,9 +97,6 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
             if InputKeyMode is not None:
                 self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-            # Put the overlay above battle markers/crosshair instead of slightly
-            # behind vehicle markers. The previous _DEPTH - 0.02 could make the
-            # SWF exist but remain visually covered by battle UI.
             self.component.position.z = _DEPTH + 1.0
             self.component.focus = False
             self.component.moveFocus = False
@@ -177,7 +170,21 @@ class Controller(object):
         self._battleMode = True
         logger.info('[FlyingDamage] avatar ready -> creating flash')
         self._createFlash()
+        BigWorld.callback(1.0, self._debugTestDamage)
         BigWorld.callback(3.0, self._installSuppressionSafe)
+
+    def _debugTestDamage(self):
+        # Temporary diagnostic marker. If this 9999 is visible in battle, SWF
+        # rendering works and only damage-event positioning needs tuning.
+        if self._flash is None or _testLog[0]:
+            return
+        try:
+            sw, sh = GUI.screenResolution()[:2]
+        except Exception:
+            sw, sh = 1920, 1080
+        _testLog[0] = True
+        logger.info('[FlyingDamage] debug test damage at center %.1f %.1f', sw / 2.0, sh / 2.0)
+        self.showDamageAt(sw / 2.0, sh / 2.0, 9999, 0x00FFFF, 36, 1.0, 80.0, 2.5)
 
     def _installSuppressionSafe(self):
         try:
@@ -227,54 +234,34 @@ class Controller(object):
         except Exception:
             pass
 
-    def _pushDamage(self, data):
-        if self._flash is None:
-            return
-        _damageQueue[0].append(data)
-        try:
-            self._flash.as_showDamage(data)
-            if _pushLog[0] < 10:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] pushed to SWF d=%s mode=%s x=%.1f y=%.1f',
-                            data.get('dmg'), data.get('mode'), data.get('x'), data.get('y'))
-        except Exception:
-            logger.error('[FlyingDamage] direct SWF push failed; queued for pull', exc_info=True)
-
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
         if self._flash is None:
             return
-        data = {
-            'mode': 'screen',
-            'x': float(x),
-            'y': float(y),
-            'dmg': int(damage),
-            'color': int(colorRGB),
-            'size': int(fontSize),
-            'alpha': float(alpha),
-            'rise': float(risePixels),
-            'life': float(lifeTime),
-        }
-        self._pushDamage(data)
+        try:
+            self._flash.as_showDamageScreen(float(x), float(y), int(damage), int(colorRGB),
+                                            int(fontSize), float(alpha), float(risePixels), float(lifeTime))
+            if _pushLog[0] < 12:
+                _pushLog[0] += 1
+                logger.info('[FlyingDamage] pushed primitive screen d=%s x=%.1f y=%.1f',
+                            int(damage), float(x), float(y))
+        except Exception:
+            logger.error('[FlyingDamage] primitive screen push failed', exc_info=True)
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                         fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
         if self._flash is None:
             return
-        data = {
-            'mode': 'world',
-            'wx': float(wx),
-            'wy': float(wy),
-            'wz': float(wz),
-            'x': float(fallbackX),
-            'y': float(fallbackY),
-            'dmg': int(damage),
-            'color': int(colorRGB),
-            'size': int(fontSize),
-            'alpha': float(alpha),
-            'rise': float(riseMeters),
-            'life': float(lifeTime),
-        }
-        self._pushDamage(data)
+        try:
+            self._flash.as_showDamageWorld(float(wx), float(wy), float(wz),
+                                           float(fallbackX), float(fallbackY),
+                                           int(damage), int(colorRGB), int(fontSize),
+                                           float(alpha), float(riseMeters), float(lifeTime))
+            if _pushLog[0] < 12:
+                _pushLog[0] += 1
+                logger.info('[FlyingDamage] pushed primitive world d=%s x=%.1f y=%.1f',
+                            int(damage), float(fallbackX), float(fallbackY))
+        except Exception:
+            logger.error('[FlyingDamage] primitive world push failed', exc_info=True)
 
     def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
         self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
