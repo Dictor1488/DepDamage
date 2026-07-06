@@ -74,10 +74,29 @@ def installSuppression():
                 logger.info('[FlyingDamage] hooked %s.%s (%s)', attr, _TARGET, modName)
             except Exception:
                 logger.info('[FlyingDamage] hook fail %s', attr, exc_info=True)
+            # Also hook start(): create+activate the flash here, in the marker
+            # plugin lifecycle (this is where DistanceMarker does it, which is
+            # why its component becomes live and ticks).
+            if 'start' in cls.__dict__:
+                try:
+                    override(cls, 'start', _pluginStartHook)
+                    logger.info('[FlyingDamage] hooked %s.start', attr)
+                except Exception:
+                    pass
 
     logger.info('[FlyingDamage] _updateHealthMarker hooks: %d', hooked)
     if hooked > 0:
         _installed[0] = True
+
+
+def _pluginStartHook(base, self, *args, **kwargs):
+    result = base(self, *args, **kwargs)
+    try:
+        from . import g_controller
+        g_controller.onMarkerPluginStart()
+    except Exception:
+        logger.error('[FlyingDamage] onMarkerPluginStart failed', exc_info=True)
+    return result
 
 
 def _updateHealthMarkerHook(base, self, *args, **kwargs):
@@ -126,11 +145,13 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
 
 def _maxHealth(vehID, fallback):
     try:
-        import BigWorld
-        veh = BigWorld.entity(vehID)
-        mh = getattr(veh, 'maxHealth', None)
-        if isinstance(mh, int) and mh > 0:
-            return mh
+        vehicle = BigWorld.entity(vehID)
+        if vehicle is not None:
+            desc = getattr(vehicle, 'typeDescriptor', None)
+            if desc is not None:
+                maxH = getattr(desc, 'maxHealth', None)
+                if maxH:
+                    return int(maxH)
     except Exception:
         pass
-    return fallback
+    return int(fallback)
