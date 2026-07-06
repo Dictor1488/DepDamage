@@ -2,10 +2,10 @@
 # flyingdamage/__init__.py  --  Python 2.7
 # Existing vehicle marker renderer for FlyingDamage.
 #
-# This build modifies the already-visible marker of the damaged vehicle for a
-# short time. It uses the current VehicleMarkerPlugin to find the markerID and
-# then drives the real marker canvas directly when public/wrapper methods are not
-# exposed by the current WoT build.
+# Current WoT build exposes only markerInvoke on the vehicle marker canvas. The
+# separate text-label/distance APIs are not present, so this build drives the
+# already-visible VehicleMarker's native updateHealth/setHealth methods. This is
+# a visibility test for the marker's built-in hit/health animation path.
 
 import logging
 
@@ -75,28 +75,35 @@ def _cancelRestores():
     _restoreCallbacks.clear()
 
 
-def _getExistingMarkerID(vehicleID):
+def _getExistingMarker(vehicleID):
     try:
         plugin = _markerPlugin[0]
         if plugin is None:
             return None
-        marker = getattr(plugin, '_markers', {}).get(int(vehicleID))
-        if marker is None:
-            return None
-        return marker.getMarkerID()
+        return getattr(plugin, '_markers', {}).get(int(vehicleID))
     except Exception:
-        logger.error('[FlyingDamage] get existing marker failed vid=%s', vehicleID, exc_info=True)
         return None
 
 
-def _getAnyExistingMarkerID():
+def _getExistingMarkerID(vehicleID):
+    marker = _getExistingMarker(vehicleID)
+    if marker is None:
+        return None
+    try:
+        return marker.getMarkerID()
+    except Exception:
+        logger.error('[FlyingDamage] get existing marker id failed vid=%s', vehicleID, exc_info=True)
+        return None
+
+
+def _getAnyExistingMarker():
     try:
         plugin = _markerPlugin[0]
         if plugin is None:
             return None
         markers = getattr(plugin, '_markers', {})
         for _vid, marker in markers.iteritems():
-            return marker.getMarkerID()
+            return marker
     except Exception:
         pass
     return None
@@ -106,8 +113,6 @@ def _getCanvas():
     parent = _markerParent[0]
     if parent is None:
         return None
-    # WoT builds differ: some expose helpers on MarkersManager, some only keep
-    # the actual C++/GUI canvas in a private __canvas field.
     for name in ('_MarkersManager__canvas', '_VehicleMarkersManager__canvas', '__canvas'):
         try:
             canvas = getattr(parent, name, None)
@@ -136,42 +141,6 @@ def _logCanvasShape():
         pass
 
 
-def _setTextLabelEnabled(markerID, enabled):
-    parent = _markerParent[0]
-    try:
-        if parent is not None and hasattr(parent, 'setMarkerTextLabelEnabled'):
-            parent.setMarkerTextLabelEnabled(markerID, enabled)
-            return True
-    except Exception:
-        pass
-    canvas = _getCanvas()
-    try:
-        if canvas is not None and hasattr(canvas, 'markerSetTextLabelEnabled'):
-            canvas.markerSetTextLabelEnabled(markerID, enabled)
-            return True
-    except Exception:
-        logger.info('[FlyingDamage] canvas.markerSetTextLabelEnabled failed markerID=%s enabled=%s', markerID, enabled, exc_info=True)
-    return False
-
-
-def _setCustomDistanceText(markerID, text):
-    parent = _markerParent[0]
-    try:
-        if parent is not None and hasattr(parent, 'setMarkerCustomDistanceStr'):
-            parent.setMarkerCustomDistanceStr(markerID, text)
-            return True
-    except Exception:
-        pass
-    canvas = _getCanvas()
-    try:
-        if canvas is not None and hasattr(canvas, 'markerSetCustomDistanceStr'):
-            canvas.markerSetCustomDistanceStr(markerID, text)
-            return True
-    except Exception:
-        logger.info('[FlyingDamage] canvas.markerSetCustomDistanceStr failed markerID=%s text=%s', markerID, text, exc_info=True)
-    return False
-
-
 def _invokeMarker(markerID, function, *args):
     parent = _markerParent[0]
     try:
@@ -189,6 +158,27 @@ def _invokeMarker(markerID, function, *args):
     except Exception:
         logger.info('[FlyingDamage] canvas.markerInvoke failed markerID=%s fn=%s', markerID, function, exc_info=True)
     return False
+
+
+def _safeHealth(marker, fallbackDamage=0):
+    try:
+        h = int(marker.getHealth())
+        if h > 0:
+            return h
+    except Exception:
+        pass
+    try:
+        ent = marker.getVehicleEntity()
+        if ent is not None:
+            h = int(getattr(ent, 'health', 0))
+            if h > 0:
+                return h
+    except Exception:
+        pass
+    try:
+        return max(int(fallbackDamage), 1)
+    except Exception:
+        return 1
 
 
 class _ExistingMarkerRenderer(object):
@@ -212,26 +202,30 @@ class _ExistingMarkerRenderer(object):
             logger.info('[FlyingDamage] marker plugin not ready; cannot show d=%s vid=%s', int(damage), vehicleID)
             return False
 
-        markerID = _getExistingMarkerID(vehicleID)
-        if markerID is None:
+        marker = _getExistingMarker(vehicleID)
+        if marker is None:
             logger.info('[FlyingDamage] existing marker not found vid=%s d=%s', vehicleID, int(damage))
             return False
+        markerID = marker.getMarkerID()
 
-        txt = str(int(damage))
         try:
-            labelOK = _setTextLabelEnabled(markerID, True)
-            textOK = _setCustomDistanceText(markerID, txt)
-            invokeOK = _invokeMarker(markerID, 'update')
+            realHealth = _safeHealth(marker, damage)
+            fakeHealth = max(0, realHealth - max(1, int(damage)))
+            # updateHealth(newHealth, damageType, attackReason). Exact strings are
+            # passed through to AS3. If the marker supports health-hit animation,
+            # this must be visible because it is the native vehicle marker path.
+            hitOK = _invokeMarker(markerID, 'updateHealth', fakeHealth, '', 'shot')
+            updOK = _invokeMarker(markerID, 'update')
 
-            if _pushLog[0] < 100:
+            if _pushLog[0] < 120:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] EXISTING_MARKER show d=%s vid=%s markerID=%s text=%s labelOK=%s textOK=%s invokeOK=%s',
-                            int(damage), vehicleID, markerID, txt, labelOK, textOK, invokeOK)
+                logger.info('[FlyingDamage] EXISTING_MARKER hit d=%s vid=%s markerID=%s hp=%s fakeHp=%s hitOK=%s updOK=%s',
+                            int(damage), vehicleID, markerID, realHealth, fakeHealth, hitOK, updOK)
 
-            self._scheduleRestore(markerID, max(0.5, float(lifeTime)))
+            self._scheduleRestore(markerID, realHealth, max(0.5, float(lifeTime)))
             return True
         except Exception:
-            logger.error('[FlyingDamage] existing marker show failed vid=%s markerID=%s',
+            logger.error('[FlyingDamage] existing marker hit failed vid=%s markerID=%s',
                          vehicleID, markerID, exc_info=True)
             return False
 
@@ -239,23 +233,25 @@ class _ExistingMarkerRenderer(object):
         if _markerPlugin[0] is None:
             logger.info('[FlyingDamage] existing-marker debug: plugin not ready')
             return False
-        markerID = _getAnyExistingMarkerID()
-        if markerID is None:
+        marker = _getAnyExistingMarker()
+        if marker is None:
             logger.info('[FlyingDamage] existing-marker debug: no existing markers yet')
             return False
         try:
-            labelOK = _setTextLabelEnabled(markerID, True)
-            textOK = _setCustomDistanceText(markerID, '9999')
-            invokeOK = _invokeMarker(markerID, 'update')
-            logger.info('[FlyingDamage] EXISTING_MARKER debug markerID=%s text=9999 labelOK=%s textOK=%s invokeOK=%s',
-                        markerID, labelOK, textOK, invokeOK)
-            self._scheduleRestore(markerID, 5.0)
+            markerID = marker.getMarkerID()
+            realHealth = _safeHealth(marker, 9999)
+            fakeHealth = max(0, realHealth - 777)
+            hitOK = _invokeMarker(markerID, 'updateHealth', fakeHealth, '', 'shot')
+            updOK = _invokeMarker(markerID, 'update')
+            logger.info('[FlyingDamage] EXISTING_MARKER debug health markerID=%s hp=%s fakeHp=%s hitOK=%s updOK=%s',
+                        markerID, realHealth, fakeHealth, hitOK, updOK)
+            self._scheduleRestore(markerID, realHealth, 5.0)
             return True
         except Exception:
-            logger.error('[FlyingDamage] existing-marker debug failed', exc_info=True)
+            logger.error('[FlyingDamage] existing-marker debug health failed', exc_info=True)
             return False
 
-    def _scheduleRestore(self, markerID, lifeTime):
+    def _scheduleRestore(self, markerID, realHealth, lifeTime):
         try:
             old = _restoreCallbacks.pop(markerID, None)
             if old is not None:
@@ -263,22 +259,21 @@ class _ExistingMarkerRenderer(object):
                     BigWorld.cancelCallback(old)
                 except Exception:
                     pass
-            _restoreCallbacks[markerID] = BigWorld.callback(lifeTime, lambda: self._restore(markerID))
+            _restoreCallbacks[markerID] = BigWorld.callback(lifeTime, lambda: self._restore(markerID, realHealth))
         except Exception:
             logger.error('[FlyingDamage] schedule restore failed markerID=%s', markerID, exc_info=True)
 
-    def _restore(self, markerID):
+    def _restore(self, markerID, realHealth):
         _restoreCallbacks.pop(markerID, None)
         if _markerPlugin[0] is None:
             return
         try:
-            textOK = _setCustomDistanceText(markerID, '')
-            labelOK = _setTextLabelEnabled(markerID, False)
-            invokeOK = _invokeMarker(markerID, 'update')
-            logger.info('[FlyingDamage] EXISTING_MARKER restore markerID=%s labelOK=%s textOK=%s invokeOK=%s',
-                        markerID, labelOK, textOK, invokeOK)
+            setOK = _invokeMarker(markerID, 'setHealth', int(realHealth))
+            updOK = _invokeMarker(markerID, 'update')
+            logger.info('[FlyingDamage] EXISTING_MARKER restoreHealth markerID=%s hp=%s setOK=%s updOK=%s',
+                        markerID, realHealth, setOK, updOK)
         except Exception:
-            logger.error('[FlyingDamage] existing marker restore failed markerID=%s', markerID, exc_info=True)
+            logger.error('[FlyingDamage] existing marker restore health failed markerID=%s', markerID, exc_info=True)
 
 
 class Controller(object):
@@ -289,7 +284,7 @@ class Controller(object):
         self._renderer = _ExistingMarkerRenderer()
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers canvas)')
+        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers updateHealth)')
         _installMarkerLayerHook()
         try:
             from .settings.config import g_config
