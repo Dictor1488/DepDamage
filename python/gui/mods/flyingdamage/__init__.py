@@ -1,51 +1,29 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene.
-# Damage is queued in Python and pulled by AS3 every tick.
-# Coordinates are stored normalized 0..1 so the SWF is resolution-independent.
+# Native GUI renderer for FlyingDamage.
+#
+# The earlier ExternalFlashComponent path logged correctly but did not render in
+# this WoT battle layer. This build draws floating damage directly with native
+# BigWorld GUI.Window + GUI.Text components, so it does not depend on a separate
+# SWF being visible.
 
 import logging
 
 import BigWorld
 import GUI
-import SCALEFORM
+
 from PlayerEvents import g_playerEvents
 
 logger = logging.getLogger(__name__)
 
 try:
-    from gui import DEPTH_OF_VehicleMarker as _DEPTH
+    from gui import g_guiResetters
 except Exception:
-    try:
-        from gui import DEPTH_OF_Battle as _DEPTH
-    except Exception:
-        _DEPTH = 0.0
+    g_guiResetters = None
 
-from gui.Scaleform.daapi.view.external_components import (
-    ExternalFlashComponent, ExternalFlashSettings)
-from gui.Scaleform.framework.entities.BaseDAAPIModule import BaseDAAPIModule
-
-try:
-    from gui.Scaleform.flash_wrapper import InputKeyMode
-except Exception:
-    InputKeyMode = None
-
-
-_SWF_NAME = 'FlyingDamageApp.swf'
-_LINKAGE = 'FlyingDamageApp'
+_SWF_NAME = 'FlyingDamageApp.swf'  # kept only for package compatibility
 _pushLog = [0]
-_pullLog = [0]
 _testLog = [False]
-_damageQueue = []
-_MAX_QUEUE = 64
-_HIGH_DEPTH = 9999.0
-
-
-def _fmt_float(v):
-    try:
-        return ('%.6f' % float(v)).rstrip('0').rstrip('.')
-    except Exception:
-        return '0'
 
 
 def _screen_size():
@@ -60,124 +38,215 @@ def _screen_size():
         return 1920.0, 1080.0
 
 
-def _norm_xy(x, y):
-    sw, sh = _screen_size()
+def _color_fmt(colorRGB, alpha=1.0):
     try:
-        nx = float(x) / sw
-        ny = float(y) / sh
+        rgb = int(colorRGB) & 0xFFFFFF
     except Exception:
-        nx, ny = 0.5, 0.5
-    nx = max(-0.25, min(1.25, nx))
-    ny = max(-0.25, min(1.25, ny))
-    return nx, ny, sw, sh
-
-
-def _queue_record(record):
+        rgb = 0xFFFFFF
     try:
-        _damageQueue.append(record)
-        if len(_damageQueue) > _MAX_QUEUE:
-            del _damageQueue[0:len(_damageQueue) - _MAX_QUEUE]
+        a = int(max(0.0, min(1.0, float(alpha))) * 255.0)
     except Exception:
-        logger.error('[FlyingDamage] queue append failed', exc_info=True)
+        a = 255
+    return '\\c%06X%02X;' % (rgb, a)
 
 
-class _FlyingDamageMeta(BaseDAAPIModule):
+class _NativeDamageNumber(object):
 
-    def py_log(self, msg):
-        logger.info('[FlyingDamage] %s', msg)
+    def __init__(self, manager, x, y, damage, colorRGB, fontSize, alpha,
+                 risePixels, lifeTime, world=None, riseMeters=1.35):
+        self.manager = manager
+        self.startX = float(x)
+        self.startY = float(y)
+        self.damage = int(damage)
+        self.colorRGB = int(colorRGB) & 0xFFFFFF
+        self.baseAlpha = max(0.0, min(1.0, float(alpha)))
+        self.risePixels = float(risePixels)
+        self.lifeTime = max(0.15, float(lifeTime))
+        self.world = world
+        self.riseMeters = float(riseMeters)
+        self.started = BigWorld.time()
+        self.window = None
+        self.shadow = None
+        self.label = None
+        self._create(int(fontSize))
 
-    def py_pullDamageText(self):
+    def _fontName(self, fontSize):
+        # WoT font names are fixed resources; native GUI.Text does not use point
+        # size directly. Pick a larger stock font for bigger configured numbers.
+        if fontSize >= 34:
+            return 'default_large.font'
+        return 'default_medium.font'
+
+    def _create(self, fontSize):
         try:
-            if not _damageQueue:
-                return ''
-            data = '\n'.join(_damageQueue)
-            del _damageQueue[:]
-            if _pullLog[0] < 20:
-                _pullLog[0] += 1
-                logger.info('[FlyingDamage] AS3 pulled damage queue: %s', data)
-            return data
+            self.window = GUI.Window('')
+            self.window.materialFX = 'BLEND'
+            self.window.verticalAnchor = 'TOP'
+            self.window.horizontalAnchor = 'LEFT'
+            self.window.horizontalPositionMode = 'PIXEL'
+            self.window.verticalPositionMode = 'PIXEL'
+            self.window.heightMode = 'PIXEL'
+            self.window.widthMode = 'PIXEL'
+            self.window.width = 220
+            self.window.height = 90
+            self.window.visible = True
+
+            GUI.addRoot(self.window)
+
+            font = self._fontName(fontSize)
+            self.shadow = GUI.Text('')
+            self._installText(self.shadow, font)
+            self.label = GUI.Text('')
+            self._installText(self.label, font)
+            self.setText(self.damage, self.baseAlpha)
+            self.update()
         except Exception:
-            logger.error('[FlyingDamage] py_pullDamageText failed', exc_info=True)
-            return ''
+            logger.error('[FlyingDamage] native number create failed', exc_info=True)
+            self.dispose()
 
-    def py_getScreenPos(self, vehicleID):
+    def _installText(self, item, font):
+        item.font = font
+        item.verticalAnchor = 'TOP'
+        item.horizontalAnchor = 'CENTER'
+        item.horizontalPositionMode = 'PIXEL'
+        item.verticalPositionMode = 'PIXEL'
+        item.position = (self.window.width / 2, 0, 1)
+        item.colourFormatting = True
+        item.visible = True
+        self.window.addChild(item)
+
+    def setText(self, damage, alpha):
+        text = str(int(damage))
         try:
-            from .hooks import projectVehicleScreen
-            return projectVehicleScreen(int(vehicleID))
-        except Exception:
-            return None
-
-    def py_projectWorld(self, x, y, z):
-        try:
-            from .hooks import projectWorldPoint
-            pos = projectWorldPoint(float(x), float(y), float(z))
-            if pos and pos.get('ok'):
-                nx, ny, _sw, _sh = _norm_xy(pos.get('x', 0.0), pos.get('y', 0.0))
-                pos['x'] = nx
-                pos['y'] = ny
-                pos['normalized'] = True
-            return pos
-        except Exception:
-            return {'x': 0.5, 'y': 0.5, 'ok': False, 'normalized': True}
-
-    def as_populate(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_populate()
-
-    def as_clear(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_clear()
-
-
-class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
-
-    def __init__(self):
-        super(FlyingDamageFlash, self).__init__(
-            ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
-        self.createExternalComponent()
-        self._configureApp()
-        try:
-            self.flashObject.py_log = self.py_log
-            self.flashObject.py_pullDamageText = self.py_pullDamageText
-            self.flashObject.py_getScreenPos = self.py_getScreenPos
-            self.flashObject.py_projectWorld = self.py_projectWorld
-        except Exception:
-            logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
-        self.as_populate()
-        logger.info('[FlyingDamage] flash component created')
-
-    def forceTopDepth(self):
-        try:
-            self.component.position.z = _HIGH_DEPTH
-            self.component.focus = False
-            self.component.moveFocus = False
-            logger.info('[FlyingDamage] flash depth forced to %.1f', self.component.position.z)
-        except Exception:
-            logger.error('[FlyingDamage] force depth failed', exc_info=True)
-
-    def _configureApp(self):
-        try:
-            self.movie.backgroundAlpha = 0.0
-            self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
-            if InputKeyMode is not None:
-                self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-            self.forceTopDepth()
-        except Exception:
-            logger.error('[FlyingDamage] configureApp partial', exc_info=True)
-
-    def close(self):
-        try:
-            self.as_dispose()
+            self.shadow.text = '\\c000000%02X;%s' % (int(alpha * 255.0), text)
+            self.label.text = _color_fmt(self.colorRGB, alpha) + text
+            # Offset shadow slightly down/right by moving its child position.
+            self.shadow.position = (self.window.width / 2 + 2, 2, 1)
+            self.label.position = (self.window.width / 2, 0, 1)
         except Exception:
             pass
-        try:
-            super(FlyingDamageFlash, self).close()
-        except Exception:
-            logger.info('[FlyingDamage] flash close (non-fatal)')
 
-    def as_dispose(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_dispose()
+    def _projectWorld(self, progress):
+        if self.world is None:
+            return None
+        try:
+            from .hooks import projectWorldPoint
+            wx, wy, wz = self.world
+            pos = projectWorldPoint(wx, wy + self.riseMeters * progress, wz)
+            if pos and pos.get('ok'):
+                return float(pos.get('x', self.startX)), float(pos.get('y', self.startY))
+        except Exception:
+            pass
+        return None
+
+    def update(self):
+        try:
+            now = BigWorld.time()
+            age = now - self.started
+            if age >= self.lifeTime:
+                return False
+            progress = age / self.lifeTime
+
+            worldPos = self._projectWorld(progress)
+            if worldPos is not None:
+                x, y = worldPos
+            else:
+                x = self.startX
+                y = self.startY - self.risePixels * progress
+
+            fadeStart = 0.55
+            if progress <= fadeStart:
+                alpha = self.baseAlpha
+            else:
+                alpha = self.baseAlpha * (1.0 - (progress - fadeStart) / (1.0 - fadeStart))
+                if alpha < 0.0:
+                    alpha = 0.0
+            self.setText(self.damage, alpha)
+
+            if self.window is not None:
+                self.window.position = (x - self.window.width / 2, y - self.window.height / 2, 1)
+                self.window.visible = True
+            return True
+        except Exception:
+            logger.error('[FlyingDamage] native number update failed', exc_info=True)
+            return False
+
+    def dispose(self):
+        try:
+            if self.window is not None:
+                GUI.delRoot(self.window)
+        except Exception:
+            pass
+        self.window = None
+        self.shadow = None
+        self.label = None
+
+
+class _NativeDamageRenderer(object):
+
+    def __init__(self):
+        self.items = []
+        self._cb = None
+        self.enabled = False
+
+    def start(self):
+        self.enabled = True
+        self._schedule()
+        logger.info('[FlyingDamage] native GUI renderer started')
+
+    def stop(self):
+        self.enabled = False
+        if self._cb is not None:
+            try:
+                BigWorld.cancelCallback(self._cb)
+            except Exception:
+                pass
+            self._cb = None
+        for item in list(self.items):
+            item.dispose()
+        del self.items[:]
+        logger.info('[FlyingDamage] native GUI renderer stopped')
+
+    def _schedule(self):
+        if not self.enabled or self._cb is not None:
+            return
+        self._cb = BigWorld.callback(0.016, self._tick)
+
+    def _tick(self):
+        self._cb = None
+        if not self.enabled:
+            return
+        alive = []
+        for item in list(self.items):
+            if item.update():
+                alive.append(item)
+            else:
+                item.dispose()
+        self.items = alive
+        self._schedule()
+
+    def showScreen(self, x, y, damage, colorRGB, fontSize, alpha, risePixels, lifeTime):
+        item = _NativeDamageNumber(self, x, y, damage, colorRGB, fontSize, alpha,
+                                   risePixels, lifeTime)
+        if item.window is not None:
+            self.items.append(item)
+            if _pushLog[0] < 30:
+                _pushLog[0] += 1
+                logger.info('[FlyingDamage] native show screen d=%s x=%.1f y=%.1f items=%d',
+                            int(damage), float(x), float(y), len(self.items))
+
+    def showWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
+                  fontSize, alpha, riseMeters, lifeTime):
+        item = _NativeDamageNumber(self, fallbackX, fallbackY, damage, colorRGB,
+                                   fontSize, alpha, 55.0, lifeTime,
+                                   world=(float(wx), float(wy), float(wz)),
+                                   riseMeters=riseMeters)
+        if item.window is not None:
+            self.items.append(item)
+            if _pushLog[0] < 30:
+                _pushLog[0] += 1
+                logger.info('[FlyingDamage] native show world d=%s fallback=(%.1f,%.1f) items=%d',
+                            int(damage), float(fallbackX), float(fallbackY), len(self.items))
 
 
 class Controller(object):
@@ -185,11 +254,10 @@ class Controller(object):
     def __init__(self):
         self._enabled = True
         self._battleMode = False
-        self._flash = None
-        self._depthTicks = 0
+        self._renderer = _NativeDamageRenderer()
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin')
+        logger.info('[FlyingDamage] controller.init begin (native GUI renderer)')
         try:
             from .settings.config import g_config
             g_config.registerSettings()
@@ -210,6 +278,12 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] early suppression failed', exc_info=True)
 
+        try:
+            if g_guiResetters is not None:
+                g_guiResetters.add(self._onScreenReset)
+        except Exception:
+            pass
+
         g_playerEvents.onAvatarReady += self._onAvatarReady
         g_playerEvents.onAvatarBecomeNonPlayer += self._onBattleLeave
         logger.info('[FlyingDamage] controller.init done')
@@ -221,49 +295,43 @@ class Controller(object):
             g_playerEvents.onAvatarBecomeNonPlayer -= self._onBattleLeave
         except Exception:
             pass
-        self._destroyFlash()
+        try:
+            if g_guiResetters is not None:
+                g_guiResetters.discard(self._onScreenReset)
+        except Exception:
+            pass
+        self._onBattleLeave()
         try:
             from .utils import restore_overrides
             restore_overrides()
         except Exception:
             pass
 
+    def _onScreenReset(self):
+        # Active numbers use pixel coordinates captured from current resolution.
+        # New numbers will use the new screen size automatically.
+        logger.info('[FlyingDamage] screen reset native renderer')
+
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
         _testLog[0] = False
-        self._depthTicks = 0
-        logger.info('[FlyingDamage] avatar ready -> delayed flash create')
-        # Battle UI, marker app, crosshair app and Gameface windows are created
-        # shortly after avatar ready. Creating our SWF after them avoids it being
-        # covered by later-created Scaleform components.
-        BigWorld.callback(2.0, self._createFlashDelayed)
-        BigWorld.callback(3.0, self._debugTestDamage)
-        BigWorld.callback(3.5, self._installSuppressionSafe)
-
-    def _createFlashDelayed(self):
-        if not self._battleMode:
-            return
-        logger.info('[FlyingDamage] delayed create flash now')
-        self._createFlash()
-        self._keepDepthOnTop()
-
-    def _keepDepthOnTop(self):
-        if not self._battleMode or self._flash is None:
-            return
-        self._depthTicks += 1
+        logger.info('[FlyingDamage] avatar ready -> native renderer active')
+        self._renderer.start()
         try:
-            self._flash.forceTopDepth()
+            from .hooks import setView
+            setView(self)
         except Exception:
             pass
-        if self._depthTicks < 10:
-            BigWorld.callback(1.0, self._keepDepthOnTop)
+        BigWorld.callback(1.0, self._debugTestDamage)
+        BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def _debugTestDamage(self):
-        if self._flash is None or _testLog[0]:
+        if not self._battleMode or _testLog[0]:
             return
         _testLog[0] = True
-        logger.info('[FlyingDamage] queue debug test damage at normalized center 0.5 0.5')
-        self.showDamageNormalized(0.5, 0.5, 9999, 0x00FFFF, 36, 1.0, 0.075, 5.0)
+        sw, sh = _screen_size()
+        logger.info('[FlyingDamage] native debug test at center %.1f %.1f', sw / 2.0, sh / 2.0)
+        self.showDamageAt(sw / 2.0, sh / 2.0, 9999, 0x00FFFF, 36, 1.0, 90.0, 5.0)
 
     def _installSuppressionSafe(self):
         try:
@@ -274,27 +342,13 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
 
-    def _createFlash(self):
-        if self._flash is not None:
-            return
-        try:
-            self._flash = FlyingDamageFlash()
-            from .hooks import setView
-            setView(self)
-        except Exception:
-            logger.error('[FlyingDamage] createFlash failed', exc_info=True)
-            self._flash = None
-
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FlyingDamage] battle leave')
         self._battleMode = False
-        self._destroyFlash()
+        self._renderer.stop()
         try:
-            del _damageQueue[:]
-        except Exception:
-            pass
-        try:
-            from .hooks import resetState
+            from .hooks import setView, resetState
+            setView(None)
             resetState()
         except Exception:
             pass
@@ -304,59 +358,17 @@ class Controller(object):
         except Exception:
             pass
 
-    def _destroyFlash(self):
-        if self._flash is not None:
-            try:
-                self._flash.close()
-            except Exception:
-                pass
-            self._flash = None
-        try:
-            from .hooks import setView
-            setView(None)
-        except Exception:
-            pass
-
-    def showDamageNormalized(self, nx, ny, damage, colorRGB, fontSize, alpha,
-                             riseNormalized=0.055, lifeTime=1.6):
-        try:
-            rec = 'N|%s|%s|%d|%d|%d|%s|%s|%s' % (
-                _fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize),
-                _fmt_float(alpha), _fmt_float(riseNormalized), _fmt_float(lifeTime))
-            _queue_record(rec)
-            if _pushLog[0] < 20:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] queued normalized d=%s nx=%.4f ny=%.4f',
-                            int(damage), float(nx), float(ny))
-        except Exception:
-            logger.error('[FlyingDamage] queue normalized failed', exc_info=True)
-
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
-        try:
-            nx, ny, sw, sh = _norm_xy(x, y)
-            riseNorm = max(0.01, min(0.20, float(risePixels) / sh))
-            self.showDamageNormalized(nx, ny, damage, colorRGB, fontSize, alpha, riseNorm, lifeTime)
-            logger.info('[FlyingDamage] screen->normalized d=%s screen=(%.1f,%.1f) res=(%.0f,%.0f) norm=(%.4f,%.4f)',
-                        int(damage), float(x), float(y), sw, sh, nx, ny)
-        except Exception:
-            logger.error('[FlyingDamage] queue screen failed', exc_info=True)
+        if not self._battleMode:
+            return
+        self._renderer.showScreen(x, y, damage, colorRGB, fontSize, alpha, risePixels, lifeTime)
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                         fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
-        try:
-            nx, ny, sw, sh = _norm_xy(fallbackX, fallbackY)
-            rec = 'W|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s' % (
-                _fmt_float(wx), _fmt_float(wy), _fmt_float(wz),
-                _fmt_float(nx), _fmt_float(ny),
-                int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
-                _fmt_float(riseMeters), _fmt_float(lifeTime))
-            _queue_record(rec)
-            if _pushLog[0] < 20:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] queued world normalized d=%s norm=(%.4f,%.4f) res=(%.0f,%.0f)',
-                            int(damage), nx, ny, sw, sh)
-        except Exception:
-            logger.error('[FlyingDamage] queue world failed', exc_info=True)
+        if not self._battleMode:
+            return
+        self._renderer.showWorld(wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
+                                 fontSize, alpha, riseMeters, lifeTime)
 
     def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
         self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
