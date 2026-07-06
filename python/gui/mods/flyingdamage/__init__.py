@@ -2,9 +2,9 @@
 # flyingdamage/__init__.py  --  Python 2.7
 # Existing vehicle marker renderer for FlyingDamage.
 #
-# This build no longer creates fake markers or overlay GUI. It modifies the
-# already-visible marker of the damaged vehicle for a short time, using the same
-# VehicleMarkerPlugin markerID that the game uses for tank HP/name markers.
+# This build modifies the already-visible marker of the damaged vehicle for a
+# short time. It calls marker methods through VehicleMarkerPlugin wrappers,
+# because MarkersManager itself does not expose every helper method.
 
 import logging
 
@@ -98,6 +98,42 @@ def _getAnyExistingMarkerID():
     return None
 
 
+def _setTextLabelEnabled(markerID, enabled):
+    plugin = _markerPlugin[0]
+    if plugin is None:
+        return False
+    try:
+        plugin._setMarkerTextLabelEnabled(markerID, enabled)
+        return True
+    except Exception:
+        logger.info('[FlyingDamage] _setMarkerTextLabelEnabled failed markerID=%s enabled=%s', markerID, enabled, exc_info=True)
+        return False
+
+
+def _setCustomDistanceText(markerID, text):
+    plugin = _markerPlugin[0]
+    if plugin is None:
+        return False
+    try:
+        plugin._setMarkerCustomDistanceStr(markerID, text)
+        return True
+    except Exception:
+        logger.info('[FlyingDamage] _setMarkerCustomDistanceStr failed markerID=%s text=%s', markerID, text, exc_info=True)
+        return False
+
+
+def _invokeMarker(markerID, function, *args):
+    plugin = _markerPlugin[0]
+    if plugin is None:
+        return False
+    try:
+        plugin._invokeMarker(markerID, function, *args)
+        return True
+    except Exception:
+        logger.info('[FlyingDamage] _invokeMarker failed markerID=%s fn=%s', markerID, function, exc_info=True)
+        return False
+
+
 class _ExistingMarkerRenderer(object):
 
     def __init__(self):
@@ -115,9 +151,8 @@ class _ExistingMarkerRenderer(object):
     def showOnVehicle(self, vehicleID, damage, colorRGB, fontSize, alpha, lifeTime):
         if not self.enabled:
             return False
-        parent = _markerParent[0]
-        if parent is None:
-            logger.info('[FlyingDamage] marker parent not ready; cannot show d=%s vid=%s', int(damage), vehicleID)
+        if _markerPlugin[0] is None:
+            logger.info('[FlyingDamage] marker plugin not ready; cannot show d=%s vid=%s', int(damage), vehicleID)
             return False
 
         markerID = _getExistingMarkerID(vehicleID)
@@ -127,25 +162,14 @@ class _ExistingMarkerRenderer(object):
 
         txt = str(int(damage))
         try:
-            # This changes only an already visible vehicle marker. It is the
-            # safest visible test: no fake VehicleMarker, no empty atlas icon.
-            try:
-                parent.setMarkerTextLabelEnabled(markerID, True)
-            except Exception:
-                pass
-            try:
-                parent.setMarkerCustomDistanceStr(markerID, txt)
-            except Exception:
-                pass
-            try:
-                parent.invokeMarker(markerID, 'update')
-            except Exception:
-                pass
+            labelOK = _setTextLabelEnabled(markerID, True)
+            textOK = _setCustomDistanceText(markerID, txt)
+            _invokeMarker(markerID, 'update')
 
-            if _pushLog[0] < 60:
+            if _pushLog[0] < 80:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] EXISTING_MARKER show d=%s vid=%s markerID=%s text=%s',
-                            int(damage), vehicleID, markerID, txt)
+                logger.info('[FlyingDamage] EXISTING_MARKER show d=%s vid=%s markerID=%s text=%s labelOK=%s textOK=%s',
+                            int(damage), vehicleID, markerID, txt, labelOK, textOK)
 
             self._scheduleRestore(markerID, max(0.5, float(lifeTime)))
             return True
@@ -155,22 +179,19 @@ class _ExistingMarkerRenderer(object):
             return False
 
     def showDebug(self):
-        parent = _markerParent[0]
-        if parent is None:
-            logger.info('[FlyingDamage] existing-marker debug: parent not ready')
+        if _markerPlugin[0] is None:
+            logger.info('[FlyingDamage] existing-marker debug: plugin not ready')
             return False
         markerID = _getAnyExistingMarkerID()
         if markerID is None:
             logger.info('[FlyingDamage] existing-marker debug: no existing markers yet')
             return False
         try:
-            parent.setMarkerTextLabelEnabled(markerID, True)
-            parent.setMarkerCustomDistanceStr(markerID, '9999')
-            try:
-                parent.invokeMarker(markerID, 'update')
-            except Exception:
-                pass
-            logger.info('[FlyingDamage] EXISTING_MARKER debug markerID=%s text=9999', markerID)
+            labelOK = _setTextLabelEnabled(markerID, True)
+            textOK = _setCustomDistanceText(markerID, '9999')
+            _invokeMarker(markerID, 'update')
+            logger.info('[FlyingDamage] EXISTING_MARKER debug markerID=%s text=9999 labelOK=%s textOK=%s',
+                        markerID, labelOK, textOK)
             self._scheduleRestore(markerID, 5.0)
             return True
         except Exception:
@@ -191,23 +212,12 @@ class _ExistingMarkerRenderer(object):
 
     def _restore(self, markerID):
         _restoreCallbacks.pop(markerID, None)
-        parent = _markerParent[0]
-        if parent is None:
+        if _markerPlugin[0] is None:
             return
         try:
-            # Reset custom distance text. Do not destroy or recreate anything.
-            try:
-                parent.setMarkerCustomDistanceStr(markerID, '')
-            except Exception:
-                pass
-            try:
-                parent.setMarkerTextLabelEnabled(markerID, False)
-            except Exception:
-                pass
-            try:
-                parent.invokeMarker(markerID, 'update')
-            except Exception:
-                pass
+            _setCustomDistanceText(markerID, '')
+            _setTextLabelEnabled(markerID, False)
+            _invokeMarker(markerID, 'update')
             logger.info('[FlyingDamage] EXISTING_MARKER restore markerID=%s', markerID)
         except Exception:
             logger.error('[FlyingDamage] existing marker restore failed markerID=%s', markerID, exc_info=True)
@@ -221,7 +231,7 @@ class Controller(object):
         self._renderer = _ExistingMarkerRenderer()
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers)')
+        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers via plugin)')
         _installMarkerLayerHook()
         try:
             from .settings.config import g_config
@@ -271,7 +281,6 @@ class Controller(object):
             setView(self)
         except Exception:
             pass
-        # Several attempts because marker plugin and its _markers are populated after battle UI creation.
         BigWorld.callback(2.0, self._debugTestDamage)
         BigWorld.callback(5.0, self._debugTestDamage)
         BigWorld.callback(8.0, self._debugTestDamage)
@@ -309,7 +318,6 @@ class Controller(object):
             pass
 
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
-        # Screen-only damage cannot be attached to an existing vehicle marker.
         if _pushLog[0] < 10:
             _pushLog[0] += 1
             logger.info('[FlyingDamage] screen damage ignored by existing-marker renderer d=%s', int(damage))
