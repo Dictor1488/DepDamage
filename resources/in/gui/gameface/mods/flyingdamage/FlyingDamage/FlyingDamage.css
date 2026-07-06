@@ -1,21 +1,16 @@
 html, body {
-  width: 2560px;
-  height: 1369px;
-  min-width: 2560px;
-  min-height: 1369px;
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 0;
-  overflow: visible;
+  overflow: hidden;
   background: transparent;
 }
 * { box-sizing: border-box; }
 #fd-size-probe {
-  position: relative;
   display: block;
   width: 2560px;
   height: 1369px;
-  min-width: 2560px;
-  min-height: 1369px;
   opacity: 0;
   pointer-events: none;
 }
