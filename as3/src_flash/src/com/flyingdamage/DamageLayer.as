@@ -15,12 +15,33 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(data:Object):void
+        public function showScreenDamage(x:Number, y:Number, damage:int,
+                                         colorRGB:uint, fontSize:int,
+                                         alpha:Number, rise:Number,
+                                         life:Number):void
         {
-            if (data == null || int(data.dmg) <= 0)
+            if (damage <= 0)
                 return;
+            var fn:FloatingNumber = FloatingNumber.createScreen(_app, x, y, damage,
+                                                                colorRGB, fontSize,
+                                                                alpha, rise, life);
+            addChild(fn);
+            _items.push(fn);
+        }
 
-            var fn:FloatingNumber = new FloatingNumber(_app, data);
+        public function showWorldDamage(wx:Number, wy:Number, wz:Number,
+                                        fallbackX:Number, fallbackY:Number,
+                                        damage:int, colorRGB:uint,
+                                        fontSize:int, alpha:Number,
+                                        rise:Number, life:Number):void
+        {
+            if (damage <= 0)
+                return;
+            var fn:FloatingNumber = FloatingNumber.createWorld(_app, wx, wy, wz,
+                                                               fallbackX, fallbackY,
+                                                               damage, colorRGB,
+                                                               fontSize, alpha,
+                                                               rise, life);
             addChild(fn);
             _items.push(fn);
         }
