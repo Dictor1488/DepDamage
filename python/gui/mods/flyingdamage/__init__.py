@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
 # Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene.
-# Damage is pushed into AS3 using primitive arguments; Python dict/Object passing
-# is deliberately avoided because it was not reliable on the current client.
+# Damage is queued in Python and pulled by AS3 every tick. This avoids unstable
+# direct Python -> AS3 calls on some WoT clients.
 
 import logging
 
@@ -34,13 +34,46 @@ except Exception:
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'FlyingDamageApp'
 _pushLog = [0]
+_pullLog = [0]
 _testLog = [False]
+_damageQueue = []
+_MAX_QUEUE = 64
+
+
+def _fmt_float(v):
+    try:
+        return ('%.3f' % float(v)).rstrip('0').rstrip('.')
+    except Exception:
+        return '0'
+
+
+def _queue_record(record):
+    try:
+        _damageQueue.append(record)
+        if len(_damageQueue) > _MAX_QUEUE:
+            del _damageQueue[0:len(_damageQueue) - _MAX_QUEUE]
+    except Exception:
+        logger.error('[FlyingDamage] queue append failed', exc_info=True)
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
 
     def py_log(self, msg):
         logger.info('[FlyingDamage] %s', msg)
+
+    def py_pullDamageText(self):
+        try:
+            if not _damageQueue:
+                return ''
+            data = '\n'.join(_damageQueue)
+            del _damageQueue[:]
+            if _pullLog[0] < 20:
+                _pullLog[0] += 1
+                logger.info('[FlyingDamage] AS3 pulled damage queue: %s', data)
+            return data
+        except Exception:
+            logger.error('[FlyingDamage] py_pullDamageText failed', exc_info=True)
+            return ''
 
     def py_getScreenPos(self, vehicleID):
         try:
@@ -84,6 +117,7 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         self._configureApp()
         try:
             self.flashObject.py_log = self.py_log
+            self.flashObject.py_pullDamageText = self.py_pullDamageText
             self.flashObject.py_getScreenPos = self.py_getScreenPos
             self.flashObject.py_projectWorld = self.py_projectWorld
         except Exception:
@@ -175,7 +209,7 @@ class Controller(object):
 
     def _debugTestDamage(self):
         # Temporary diagnostic marker. If this 9999 is visible in battle, SWF
-        # rendering works and only damage-event positioning needs tuning.
+        # rendering works. It is queued so AS3 pulls it itself.
         if self._flash is None or _testLog[0]:
             return
         try:
@@ -183,8 +217,8 @@ class Controller(object):
         except Exception:
             sw, sh = 1920, 1080
         _testLog[0] = True
-        logger.info('[FlyingDamage] debug test damage at center %.1f %.1f', sw / 2.0, sh / 2.0)
-        self.showDamageAt(sw / 2.0, sh / 2.0, 9999, 0x00FFFF, 36, 1.0, 80.0, 2.5)
+        logger.info('[FlyingDamage] queue debug test damage at center %.1f %.1f', sw / 2.0, sh / 2.0)
+        self.showDamageAt(sw / 2.0, sh / 2.0, 9999, 0x00FFFF, 36, 1.0, 80.0, 4.0)
 
     def _installSuppressionSafe(self):
         try:
@@ -211,6 +245,10 @@ class Controller(object):
         self._battleMode = False
         self._destroyFlash()
         try:
+            del _damageQueue[:]
+        except Exception:
+            pass
+        try:
             from .hooks import resetState
             resetState()
         except Exception:
@@ -235,33 +273,33 @@ class Controller(object):
             pass
 
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
-        if self._flash is None:
-            return
         try:
-            self._flash.as_showDamageScreen(float(x), float(y), int(damage), int(colorRGB),
-                                            int(fontSize), float(alpha), float(risePixels), float(lifeTime))
-            if _pushLog[0] < 12:
+            rec = 'S|%s|%s|%d|%d|%d|%s|%s|%s' % (
+                _fmt_float(x), _fmt_float(y), int(damage), int(colorRGB), int(fontSize),
+                _fmt_float(alpha), _fmt_float(risePixels), _fmt_float(lifeTime))
+            _queue_record(rec)
+            if _pushLog[0] < 20:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] pushed primitive screen d=%s x=%.1f y=%.1f',
+                logger.info('[FlyingDamage] queued screen d=%s x=%.1f y=%.1f',
                             int(damage), float(x), float(y))
         except Exception:
-            logger.error('[FlyingDamage] primitive screen push failed', exc_info=True)
+            logger.error('[FlyingDamage] queue screen failed', exc_info=True)
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                         fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
-        if self._flash is None:
-            return
         try:
-            self._flash.as_showDamageWorld(float(wx), float(wy), float(wz),
-                                           float(fallbackX), float(fallbackY),
-                                           int(damage), int(colorRGB), int(fontSize),
-                                           float(alpha), float(riseMeters), float(lifeTime))
-            if _pushLog[0] < 12:
+            rec = 'W|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s' % (
+                _fmt_float(wx), _fmt_float(wy), _fmt_float(wz),
+                _fmt_float(fallbackX), _fmt_float(fallbackY),
+                int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
+                _fmt_float(riseMeters), _fmt_float(lifeTime))
+            _queue_record(rec)
+            if _pushLog[0] < 20:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] pushed primitive world d=%s x=%.1f y=%.1f',
+                logger.info('[FlyingDamage] queued world d=%s x=%.1f y=%.1f',
                             int(damage), float(fallbackX), float(fallbackY))
         except Exception:
-            logger.error('[FlyingDamage] primitive world push failed', exc_info=True)
+            logger.error('[FlyingDamage] queue world failed', exc_info=True)
 
     def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
         self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
