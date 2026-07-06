@@ -7,12 +7,9 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * Damage can arrive in two ways:
-     *   1) direct Python -> AS3 call: as_showDamage(data)
-     *   2) fallback pull queue: py_pullDamage()
-     *
-     * Direct push is preferred because some Scaleform external components do not
-     * reliably execute polling callbacks every frame in battle.
+     * Uses primitive AS calls from Python. Passing Python dict/Object through
+     * Scaleform was not reliable on the current client, so damage is pushed as
+     * separate Number/int arguments.
      */
     public class FlyingDamageApp extends Sprite
     {
@@ -44,21 +41,43 @@ package com.flyingdamage
             log("as_populate (timer started)");
         }
 
-        public function as_showDamage(data:Object):void
+        public function as_showDamageScreen(x:Number, y:Number, damage:int,
+                                            colorRGB:uint, fontSize:int,
+                                            alpha:Number, rise:Number,
+                                            life:Number):void
         {
             _ensureLayer();
-            if (data == null)
-                return;
             try
             {
-                _layer.showDamage(data);
+                _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 8)
-                    log("as_showDamage d=" + data.dmg + " mode=" + data.mode + " x=" + data.x + " y=" + data.y);
+                if (_debugShown <= 12)
+                    log("as_showDamageScreen d=" + damage + " x=" + x + " y=" + y);
             }
             catch (e:Error)
             {
-                log("as_showDamage error: " + e.message);
+                log("as_showDamageScreen error: " + e.message);
+            }
+        }
+
+        public function as_showDamageWorld(wx:Number, wy:Number, wz:Number,
+                                           fallbackX:Number, fallbackY:Number,
+                                           damage:int, colorRGB:uint,
+                                           fontSize:int, alpha:Number,
+                                           rise:Number, life:Number):void
+        {
+            _ensureLayer();
+            try
+            {
+                _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
+                                       colorRGB, fontSize, alpha, rise, life);
+                _debugShown++;
+                if (_debugShown <= 12)
+                    log("as_showDamageWorld d=" + damage + " x=" + fallbackX + " y=" + fallbackY);
+            }
+            catch (e:Error)
+            {
+                log("as_showDamageWorld error: " + e.message);
             }
         }
 
@@ -97,15 +116,6 @@ package com.flyingdamage
             return null;
         }
 
-        public function getScreenPos(vehicleID:String):Object
-        {
-            if (py_getScreenPos == null)
-                return null;
-            try { return py_getScreenPos(vehicleID); }
-            catch (e:Error) {}
-            return null;
-        }
-
         private function _ensureLayer():void
         {
             if (_layer == null)
@@ -119,24 +129,6 @@ package com.flyingdamage
         {
             if (_layer == null)
                 return;
-
-            if (py_pullDamage != null)
-            {
-                try
-                {
-                    var list:Object = py_pullDamage();
-                    if (list != null && list.length > 0)
-                    {
-                        for (var i:int = 0; i < list.length; i++)
-                            as_showDamage(list[i]);
-                    }
-                }
-                catch (err:Error)
-                {
-                    log("pull error: " + err.message);
-                }
-            }
-
             _layer.tick();
         }
 
