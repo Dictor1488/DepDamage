@@ -183,7 +183,7 @@ def _showResolvedDamage(vid, damage, source):
     isEnemy = _isEnemy(vehicle, vid)
     color = g_config.colorForTeam(isEnemy)
 
-    if _feedLog[0] < 20:
+    if _feedLog[0] < 25:
         _feedLog[0] += 1
         logger.info('[FlyingDamage] %s -> showDamage vid=%s dmg=%d mode=%s screen=(%.1f,%.1f) world=(%.2f,%.2f,%.2f)',
                     source, vid, damage, g_config.anchorMode, sx, sy,
@@ -201,7 +201,7 @@ def _showResolvedDamage(vid, damage, source):
 
 
 def _limitedLog(fmt, *args):
-    if _feedLog[0] < 20:
+    if _feedLog[0] < 25:
         _feedLog[0] += 1
         logger.info(fmt, *args)
 
@@ -245,7 +245,7 @@ def _isEnemy(vehicle, vid):
     return True
 
 
-def _vehicleAnchor(vehicle):
+def _vehicleAnchor(vehicle, extraRise=0.0):
     try:
         tmp = Math.Matrix()
         tmp.set(vehicle.matrix)
@@ -254,7 +254,11 @@ def _vehicleAnchor(vehicle):
         pos = getattr(vehicle, 'position', None)
         if pos is None:
             return None
-    return Math.Vector3(pos.x, pos.y + _ANCHOR_UP, pos.z)
+    try:
+        rise = float(extraRise)
+    except Exception:
+        rise = 0.0
+    return Math.Vector3(pos.x, pos.y + _ANCHOR_UP + rise, pos.z)
 
 
 def _buildVP():
@@ -291,8 +295,8 @@ def _projectPoint(x, y, z):
         return (None, None, False)
 
 
-def _project(vehicle):
-    anchor = _vehicleAnchor(vehicle)
+def _project(vehicle, extraRise=0.0):
+    anchor = _vehicleAnchor(vehicle, extraRise)
     if anchor is None:
         return None
     sx, sy, visible = _projectPoint(anchor.x, anchor.y, anchor.z)
@@ -301,19 +305,21 @@ def _project(vehicle):
     return (sx, sy, visible)
 
 
-def projectVehicleScreen(vid):
-    if _projCallLog[0] < 5:
+def projectVehicleScreen(vid, extraRise=0.0):
+    if _projCallLog[0] < 10:
         _projCallLog[0] += 1
-        logger.info('[FlyingDamage] py_getScreenPos called vid=%s', vid)
+        logger.info('[FlyingDamage] py_getScreenPos called vid=%s rise=%.2f', vid, float(extraRise))
     try:
         vehicle = BigWorld.entity(int(vid))
         if vehicle is None or not _isVehicleUsable(vehicle):
             return {'x': 0.0, 'y': 0.0, 'ok': False}
-        res = _project(vehicle)
+        res = _project(vehicle, extraRise)
         if res is None:
             return {'x': 0.0, 'y': 0.0, 'ok': False}
         sx, sy, visible = res
-        return {'x': float(sx), 'y': float(sy), 'ok': sx is not None and sy is not None}
+        if _isFarOutside(sx, sy):
+            return {'x': 0.0, 'y': 0.0, 'ok': False, 'visible': False}
+        return {'x': float(sx), 'y': float(sy), 'ok': True, 'visible': bool(visible)}
     except Exception:
         return {'x': 0.0, 'y': 0.0, 'ok': False}
 
