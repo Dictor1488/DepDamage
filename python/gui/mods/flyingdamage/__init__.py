@@ -38,6 +38,7 @@ _pullLog = [0]
 _testLog = [False]
 _damageQueue = []
 _MAX_QUEUE = 64
+_HIGH_DEPTH = 9999.0
 
 
 def _fmt_float(v):
@@ -66,8 +67,6 @@ def _norm_xy(x, y):
         ny = float(y) / sh
     except Exception:
         nx, ny = 0.5, 0.5
-    # Do not hard clamp to 0..1. Slightly off-screen values may still be useful
-    # during edge cases, but keep them sane so broken projections cannot explode.
     nx = max(-0.25, min(1.25, nx))
     ny = max(-0.25, min(1.25, ny))
     return nx, ny, sw, sh
@@ -147,16 +146,22 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         self.as_populate()
         logger.info('[FlyingDamage] flash component created')
 
+    def forceTopDepth(self):
+        try:
+            self.component.position.z = _HIGH_DEPTH
+            self.component.focus = False
+            self.component.moveFocus = False
+            logger.info('[FlyingDamage] flash depth forced to %.1f', self.component.position.z)
+        except Exception:
+            logger.error('[FlyingDamage] force depth failed', exc_info=True)
+
     def _configureApp(self):
         try:
             self.movie.backgroundAlpha = 0.0
             self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
             if InputKeyMode is not None:
                 self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-            self.component.position.z = _DEPTH + 1.0
-            self.component.focus = False
-            self.component.moveFocus = False
-            logger.info('[FlyingDamage] flash depth set to %.3f', self.component.position.z)
+            self.forceTopDepth()
         except Exception:
             logger.error('[FlyingDamage] configureApp partial', exc_info=True)
 
@@ -181,6 +186,7 @@ class Controller(object):
         self._enabled = True
         self._battleMode = False
         self._flash = None
+        self._depthTicks = 0
 
     def init(self):
         logger.info('[FlyingDamage] controller.init begin')
@@ -224,17 +230,40 @@ class Controller(object):
 
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
-        logger.info('[FlyingDamage] avatar ready -> creating flash')
+        _testLog[0] = False
+        self._depthTicks = 0
+        logger.info('[FlyingDamage] avatar ready -> delayed flash create')
+        # Battle UI, marker app, crosshair app and Gameface windows are created
+        # shortly after avatar ready. Creating our SWF after them avoids it being
+        # covered by later-created Scaleform components.
+        BigWorld.callback(2.0, self._createFlashDelayed)
+        BigWorld.callback(3.0, self._debugTestDamage)
+        BigWorld.callback(3.5, self._installSuppressionSafe)
+
+    def _createFlashDelayed(self):
+        if not self._battleMode:
+            return
+        logger.info('[FlyingDamage] delayed create flash now')
         self._createFlash()
-        BigWorld.callback(1.0, self._debugTestDamage)
-        BigWorld.callback(3.0, self._installSuppressionSafe)
+        self._keepDepthOnTop()
+
+    def _keepDepthOnTop(self):
+        if not self._battleMode or self._flash is None:
+            return
+        self._depthTicks += 1
+        try:
+            self._flash.forceTopDepth()
+        except Exception:
+            pass
+        if self._depthTicks < 10:
+            BigWorld.callback(1.0, self._keepDepthOnTop)
 
     def _debugTestDamage(self):
         if self._flash is None or _testLog[0]:
             return
         _testLog[0] = True
         logger.info('[FlyingDamage] queue debug test damage at normalized center 0.5 0.5')
-        self.showDamageNormalized(0.5, 0.5, 9999, 0x00FFFF, 36, 1.0, 0.075, 4.0)
+        self.showDamageNormalized(0.5, 0.5, 9999, 0x00FFFF, 36, 1.0, 0.075, 5.0)
 
     def _installSuppressionSafe(self):
         try:
@@ -305,7 +334,6 @@ class Controller(object):
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
         try:
             nx, ny, sw, sh = _norm_xy(x, y)
-            # Convert vertical rise in pixels to normalized screen height.
             riseNorm = max(0.01, min(0.20, float(risePixels) / sh))
             self.showDamageNormalized(nx, ny, damage, colorRGB, fontSize, alpha, riseNorm, lifeTime)
             logger.info('[FlyingDamage] screen->normalized d=%s screen=(%.1f,%.1f) res=(%.0f,%.0f) norm=(%.4f,%.4f)',
