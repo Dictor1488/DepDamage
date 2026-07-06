@@ -1,14 +1,6 @@
 # -*- coding: utf-8 -*-
 # hooks.py  --  Python 2.7
 # Damage source + projection helpers for FlyingDamage.
-#
-# Two display modes are supported:
-#   1) screen_fixed: capture screen x/y once at hit time.
-#   2) world_anchor: capture the tank/world point once at hit time and let the
-#      SWF re-project that fixed world point every frame while it rises. This is
-#      the closest standalone behaviour to XVM-style marker damage without
-#      depending on XVM internals: the number belongs to a world point over the
-#      target, not to a free overlay or to the moving vehicle object.
 
 import logging
 
@@ -21,18 +13,18 @@ from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
-_ANCHOR_UP = 4.5        # meters above tank origin, near turret/marker height
-_MERGE_WINDOW = 0.09    # seconds; merge near-simultaneous damage into one value
+_ANCHOR_UP = 4.5
+_MERGE_WINDOW = 0.09
 _ctrlRef = [None]
-_pending = {}           # vehicleID -> accumulated damage from onHealthChanged
-_callbacks = {}         # vehicleID -> pending callback id
+_pending = {}
+_callbacks = {}
 
-_feedPending = {}       # vehicleID -> accumulated damage from marker hook
+_feedPending = {}
 _feedCallbacks = {}
 _FEED_MERGE = 0.09
 _feedLog = [0]
 _projCallLog = [0]
-_lastAttacker = {}      # vehicleID -> attackerID
+_lastAttacker = {}
 
 
 def setView(controller):
@@ -86,7 +78,6 @@ def _recordAttacker(vehicle, args):
             ints.append(int(a))
         except (TypeError, ValueError):
             pass
-    # args: (newHealth, oldHealth, attackerID, ...)
     if len(ints) >= 3:
         _lastAttacker[vid] = ints[2]
 
@@ -103,7 +94,6 @@ def isMyDamage(vid):
 
 
 def _capture(vehicle, args):
-    """Legacy onHealthChanged capture path. Suppression hook is usually used."""
     vid = getattr(vehicle, 'id', None)
     if vid is None:
         return
@@ -140,7 +130,6 @@ def _capture(vehicle, args):
 
 
 def showDamageForVehicle(vid, damage):
-    """Called by suppress.py: accumulate, then resolve relation + anchor + feed SWF."""
     if not g_config.enabled or damage <= 0:
         return
     if g_config.hideMyDamage and isMyDamage(vid):
@@ -194,7 +183,7 @@ def _showResolvedDamage(vid, damage, source):
     isEnemy = _isEnemy(vehicle, vid)
     color = g_config.colorForTeam(isEnemy)
 
-    if _feedLog[0] < 10:
+    if _feedLog[0] < 20:
         _feedLog[0] += 1
         logger.info('[FlyingDamage] %s -> showDamage vid=%s dmg=%d mode=%s screen=(%.1f,%.1f) world=(%.2f,%.2f,%.2f)',
                     source, vid, damage, g_config.anchorMode, sx, sy,
@@ -203,7 +192,8 @@ def _showResolvedDamage(vid, damage, source):
     if g_config.anchorMode == 'world_anchor':
         ctrl.showDamageWorld(anchor.x, anchor.y, anchor.z, sx, sy, damage, color,
                              g_config.fontSize, g_config.opacity / 100.0,
-                             g_config.riseMeters, g_config.lifeTime)
+                             g_config.riseMeters, g_config.lifeTime,
+                             vehicleID=vid)
     else:
         ctrl.showDamageAt(sx, sy, damage, color,
                           g_config.fontSize, g_config.opacity / 100.0,
@@ -211,7 +201,7 @@ def _showResolvedDamage(vid, damage, source):
 
 
 def _limitedLog(fmt, *args):
-    if _feedLog[0] < 10:
+    if _feedLog[0] < 20:
         _feedLog[0] += 1
         logger.info(fmt, *args)
 
@@ -225,7 +215,6 @@ def _isFarOutside(sx, sy):
 
 
 def _isVehicleUsable(vehicle):
-    """True only if the vehicle is on the scene and alive enough for a marker."""
     try:
         if not getattr(vehicle, 'isStarted', False):
             return False
@@ -257,7 +246,6 @@ def _isEnemy(vehicle, vid):
 
 
 def _vehicleAnchor(vehicle):
-    """Capture a fixed world point above the vehicle at damage time."""
     try:
         tmp = Math.Matrix()
         tmp.set(vehicle.matrix)
@@ -293,7 +281,7 @@ def _projectPoint(x, y, z):
         v = vp.applyV4Point(v)
         w = v.w
         if w <= 0:
-            return (None, None, False)  # behind camera
+            return (None, None, False)
         cx = v.x / w
         cy = v.y / w
         visible = -1 <= cx <= 1 and -1 <= cy <= 1
@@ -314,7 +302,6 @@ def _project(vehicle):
 
 
 def projectVehicleScreen(vid):
-    """Legacy callback kept for compatibility."""
     if _projCallLog[0] < 5:
         _projCallLog[0] += 1
         logger.info('[FlyingDamage] py_getScreenPos called vid=%s', vid)
@@ -332,7 +319,6 @@ def projectVehicleScreen(vid):
 
 
 def projectWorldPoint(x, y, z):
-    """SWF callback: project a fixed world point to current screen coordinates."""
     try:
         sx, sy, visible = _projectPoint(float(x), float(y), float(z))
         if sx is None or sy is None or _isFarOutside(sx, sy):
