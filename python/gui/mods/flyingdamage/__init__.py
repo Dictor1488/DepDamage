@@ -17,17 +17,26 @@ RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
 
 _OPENWG_OK = False
 _OPENWG_ERR = None
+_IMPORT_STAGE = 'start'
 try:
+    _IMPORT_STAGE = 'frameworks.wulf.ViewModel'
     from frameworks.wulf import ViewModel
+
+    _IMPORT_STAGE = 'gui.impl.pub.ViewImpl'
     from gui.impl.pub import ViewImpl
+
+    _IMPORT_STAGE = 'ViewSettings'
     try:
-        from gui.impl.pub.view_impl import ViewSettings, ViewFlags
+        from gui.impl.pub.view_impl import ViewSettings
     except Exception:
-        from gui.impl.pub import ViewSettings, ViewFlags
+        from gui.impl.pub.view_settings import ViewSettings
+
+    _IMPORT_STAGE = 'WindowImpl/WindowFlags'
     try:
         from gui.impl.pub.window_impl import WindowImpl, WindowFlags
     except Exception:
         from gui.impl.pub import WindowImpl, WindowFlags
+
     _OPENWG_OK = True
 except Exception as _e:
     ViewModel = object
@@ -35,9 +44,8 @@ except Exception as _e:
     ViewSettings = None
     WindowImpl = object
     WindowFlags = None
-    ViewFlags = None
     _OPENWG_OK = False
-    _OPENWG_ERR = _e
+    _OPENWG_ERR = '%s: %s' % (_IMPORT_STAGE, _e)
 
 
 if _OPENWG_OK:
@@ -62,10 +70,6 @@ if _OPENWG_OK:
 
         def __init__(self):
             settings = ViewSettings(RES_MAP_ITEM_ID)
-            try:
-                settings.flags = ViewFlags.VIEW
-            except Exception:
-                pass
             settings.model = FlyingDamageModel()
             super(FlyingDamageView, self).__init__(settings)
             self._lastRaw = None
