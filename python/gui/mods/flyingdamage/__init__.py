@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene.
-# In this WoT build only as_populate reliably reaches AS3, so Python drives the
-# renderer by repeatedly calling as_populate(); the SWF treats it as a tick.
+# One-shot visible renderer: in this WoT build only the first framework-driven
+# as_populate reliably reaches AS3. Therefore the SWF is created when damage is
+# already queued, so that first as_populate immediately pulls and draws it.
 
 import logging
 
@@ -34,6 +34,7 @@ except Exception:
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'com.flyingdamage.FlyingDamageApp'
 _damageQueue = [[]]
+_flashSeq = [0]
 
 
 class _FlyingDamageMeta(BaseDAAPIModule):
@@ -57,20 +58,18 @@ class _FlyingDamageMeta(BaseDAAPIModule):
             logger.info('[FlyingDamage] py_pullDamage returns %d item(s)', len(q))
             return q
         except Exception:
+            logger.error('[FlyingDamage] py_pullDamage failed', exc_info=True)
             return []
 
     def as_populate(self):
         if self._isDAAPIInited():
             self.flashObject.as_populate()
 
-    def as_clear(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_clear()
-
 
 class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
 
-    def __init__(self):
+    def __init__(self, seq):
+        self._seq = seq
         super(FlyingDamageFlash, self).__init__(
             ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
         self.createExternalComponent()
@@ -81,31 +80,12 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             self.flashObject.py_pullDamage = self.py_pullDamage
         except Exception:
             logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
-        logger.info('[FlyingDamage] flash component created')
-
-    def activate(self):
         try:
             self.active(True)
-            logger.info('[FlyingDamage] active(True) called')
+            logger.info('[FlyingDamage] oneShot flash #%s active(True) queue=%d', self._seq, len(_damageQueue[0]))
         except Exception:
-            logger.error('[FlyingDamage] active(True) failed', exc_info=True)
-        self._popRunning = True
-        self._popCount = 0
-        self._pumpPopulate()
-
-    def _pumpPopulate(self):
-        if not getattr(self, '_popRunning', False):
-            return
-        self._popCount += 1
-        if self._popCount <= 5 or self._popCount % 300 == 0:
-            logger.info('[FlyingDamage] pumpPopulate #%d DAAPIInited=%s flashObj=%s queue=%d',
-                        self._popCount, self._isDAAPIInited(),
-                        self.flashObject is not None, len(_damageQueue[0]))
-        try:
-            self.as_populate()
-        except Exception:
-            logger.error('[FlyingDamage] pumpPopulate failed', exc_info=True)
-        BigWorld.callback(0.016, self._pumpPopulate)
+            logger.error('[FlyingDamage] active failed', exc_info=True)
+        logger.info('[FlyingDamage] oneShot flash #%s created', self._seq)
 
     def _configureApp(self):
         try:
@@ -113,14 +93,13 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
             self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
             if InputKeyMode is not None:
                 self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-            self.component.position.z = _DEPTH - 0.02
+            self.component.position.z = 9999.0
             self.component.focus = False
             self.component.moveFocus = False
         except Exception:
             logger.error('[FlyingDamage] configureApp partial', exc_info=True)
 
     def close(self):
-        self._popRunning = False
         try:
             if self._isDAAPIInited():
                 self.flashObject.as_dispose()
@@ -129,7 +108,7 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         try:
             super(FlyingDamageFlash, self).close()
         except Exception:
-            logger.info('[FlyingDamage] flash close (non-fatal)')
+            logger.info('[FlyingDamage] oneShot flash close non-fatal')
 
 
 class Controller(object):
@@ -137,11 +116,11 @@ class Controller(object):
     def __init__(self):
         self._enabled = True
         self._battleMode = False
-        self._flash = None
+        self._flashes = []
         self._pushLog = 0
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin')
+        logger.info('[FlyingDamage] controller.init begin one-shot SWF renderer')
         try:
             from .settings.config import g_config
             g_config.registerSettings()
@@ -173,7 +152,7 @@ class Controller(object):
             g_playerEvents.onAvatarBecomeNonPlayer -= self._onBattleLeave
         except Exception:
             pass
-        self._destroyFlash()
+        self._destroyAllFlashes()
         try:
             from .utils import restore_overrides
             restore_overrides()
@@ -186,8 +165,14 @@ class Controller(object):
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def onMarkerPluginStart(self):
-        logger.info('[FlyingDamage] marker plugin start -> creating flash')
-        self._createFlash()
+        # Do not create SWF here. Creating it before damage means the only
+        # reliable AS3 entry (first as_populate) is wasted with an empty queue.
+        logger.info('[FlyingDamage] marker plugin start -> waiting for damage')
+        try:
+            from .hooks import setView
+            setView(self)
+        except Exception:
+            pass
 
     def _installSuppressionSafe(self):
         try:
@@ -198,22 +183,33 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
 
-    def _createFlash(self):
-        if self._flash is not None:
-            return
+    def _makeFlashForQueuedDamage(self):
+        _flashSeq[0] += 1
+        seq = _flashSeq[0]
         try:
-            self._flash = FlyingDamageFlash()
-            self._flash.activate()
-            from .hooks import setView
-            setView(self)
+            flash = FlyingDamageFlash(seq)
+            self._flashes.append(flash)
+            BigWorld.callback(2.0, lambda: self._closeFlash(flash, seq))
         except Exception:
-            logger.error('[FlyingDamage] createFlash failed', exc_info=True)
-            self._flash = None
+            logger.error('[FlyingDamage] oneShot flash create failed', exc_info=True)
+
+    def _closeFlash(self, flash, seq):
+        try:
+            if flash in self._flashes:
+                self._flashes.remove(flash)
+            flash.close()
+            logger.info('[FlyingDamage] oneShot flash #%s closed', seq)
+        except Exception:
+            pass
 
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FlyingDamage] battle leave')
         self._battleMode = False
-        self._destroyFlash()
+        self._destroyAllFlashes()
+        try:
+            del _damageQueue[0][:]
+        except Exception:
+            pass
         try:
             from .hooks import resetState
             resetState()
@@ -225,13 +221,13 @@ class Controller(object):
         except Exception:
             pass
 
-    def _destroyFlash(self):
-        if self._flash is not None:
+    def _destroyAllFlashes(self):
+        for flash in list(self._flashes):
             try:
-                self._flash.close()
+                flash.close()
             except Exception:
                 pass
-            self._flash = None
+        self._flashes = []
         try:
             from .hooks import setView
             setView(None)
@@ -239,8 +235,6 @@ class Controller(object):
             pass
 
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
-        if self._flash is None:
-            return
         _damageQueue[0].append({
             'vid': str(int(vehicleID)),
             'dmg': int(damage),
@@ -248,10 +242,11 @@ class Controller(object):
             'size': int(fontSize),
             'alpha': float(alpha),
         })
-        if self._pushLog < 80:
+        if self._pushLog < 120:
             self._pushLog += 1
-            logger.info('[FlyingDamage] queued visible vehicle damage vid=%s dmg=%s queue=%d',
+            logger.info('[FlyingDamage] queued oneShot damage vid=%s dmg=%s queue=%d -> create SWF',
                         int(vehicleID), int(damage), len(_damageQueue[0]))
+        self._makeFlashForQueuedDamage()
 
 
 g_controller = Controller()
