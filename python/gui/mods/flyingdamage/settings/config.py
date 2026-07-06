@@ -33,10 +33,9 @@ class Config(object):
         self.hideStandard = True
         self.hideMyDamage = True
 
-        # SAFE DEFAULT: screen_fixed. It guarantees that the damage is visible.
-        # World anchor is still available in settings, but it is experimental
-        # until the projection bridge is verified on the current WoT client.
-        self.anchorMode = 'screen_fixed'
+        # Marker-layer renderer needs a real world anchor because it renders in
+        # the same world-bound marker canvas as tank HP/name markers.
+        self.anchorMode = 'world_anchor'
         self.risePixels = 55
         self.riseMeters = 1.35
         self.lifeTime = 1.6
@@ -88,9 +87,6 @@ class Config(object):
                     'options': [{'label': l} for l in colorLabels],
                     'varName': varName}
 
-        anchorLabels = [u'Screen fixed fallback', u'World anchor / XVM-like']
-        anchorValue = 1 if self.anchorMode == 'world_anchor' else 0
-
         return {
             'modDisplayName': MOD_DISPLAY_NAME,
             'enabled': self.enabled,
@@ -104,10 +100,7 @@ class Config(object):
                 dropdown(u'Ally color', self.allyColorIndex, 'allyColorIndex'),
                 dropdown(u'Single color (if not by team)',
                          self.colorIndex, 'colorIndex'),
-                {'type': 'Dropdown', 'text': u'Position mode',
-                 'value': anchorValue,
-                 'options': [{'label': l} for l in anchorLabels],
-                 'varName': 'anchorMode'},
+                {'type': 'Label', 'text': u'Render mode: battle vehicle marker layer'},
             ],
             'column2': [
                 {'type': 'Slider', 'text': u'Opacity',
@@ -142,16 +135,9 @@ class Config(object):
             self.enemyColorIndex = int(s.get('enemyColorIndex', self.enemyColorIndex))
             self.allyColorIndex = int(s.get('allyColorIndex', self.allyColorIndex))
 
-            mode = s.get('anchorMode', self.anchorMode)
-            # New dropdown order: 0=screen_fixed, 1=world_anchor.
-            # Also accept old saved order from previous build: old 0 meant world.
-            # For safety, any unknown/old numeric value defaults to screen_fixed.
-            if mode == 'world_anchor':
-                self.anchorMode = 'world_anchor'
-            elif mode == 1 or mode == '1':
-                self.anchorMode = 'world_anchor'
-            else:
-                self.anchorMode = 'screen_fixed'
+            # Ignore any old saved screen_fixed setting. The new renderer is
+            # bound to vehicle-marker world matrices only.
+            self.anchorMode = 'world_anchor'
 
             self.riseMeters = float(s.get('riseMeters', self.riseMeters))
             self.lifeTime = float(s.get('lifeTime', self.lifeTime))
