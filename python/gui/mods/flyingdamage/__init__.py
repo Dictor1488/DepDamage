@@ -2,7 +2,7 @@
 # flyingdamage/__init__.py  --  Python 2.7
 # Gameface renderer for FlyingDamage. No AS3/SWF bridge is used.
 # Python catches damage, projects the vehicle to screen pixels, then pushes a
-# JSON payload into a fullscreen WULF/Gameface overlay. JS draws the numbers.
+# JSON payload into a WULF/Gameface view. JS draws the numbers.
 
 import json
 import logging
@@ -20,7 +20,7 @@ _OPENWG_ERR = None
 _IMPORT_STAGE = 'start'
 try:
     _IMPORT_STAGE = 'frameworks.wulf'
-    from frameworks.wulf import ViewModel, ViewSettings, ViewFlags, WindowFlags, WindowLayer, WindowSettings
+    from frameworks.wulf import ViewModel, ViewSettings, ViewFlags, WindowFlags
 
     _IMPORT_STAGE = 'gui.impl.pub'
     from gui.impl.pub import ViewImpl, WindowImpl
@@ -34,8 +34,6 @@ except Exception as _e:
     ViewSettings = None
     ViewFlags = None
     WindowFlags = None
-    WindowLayer = None
-    WindowSettings = None
     ViewImpl = object
     WindowImpl = object
     ModDynAccessor = None
@@ -87,24 +85,14 @@ if _OPENWG_OK:
     class FlyingDamageWindow(WindowImpl):
 
         def __init__(self):
-            content = FlyingDamageView()
-            flags = WindowFlags.WINDOW
-            try:
-                flags = flags | WindowFlags.WINDOW_FULLSCREEN
-            except Exception:
-                pass
-            try:
-                settings = WindowSettings(flags, content=content, layer=WindowLayer.TOP_WINDOW)
-                super(FlyingDamageWindow, self).__init__(settings)
-                logger.info('[FlyingDamageGF] fullscreen window settings TOP_WINDOW')
-            except Exception:
-                try:
-                    settings = WindowSettings(flags, content=content, layer=WindowLayer.VIEW)
-                    super(FlyingDamageWindow, self).__init__(settings)
-                    logger.info('[FlyingDamageGF] fullscreen window settings VIEW')
-                except Exception:
-                    super(FlyingDamageWindow, self).__init__(wndFlags=flags, content=content)
-                    logger.info('[FlyingDamageGF] fallback WindowImpl wndFlags=%s', flags)
+            # Use the same simple WindowImpl path as the working CustomHPBarGF.
+            # It loads on WULF layer 7 in this client; the previous fullscreen
+            # fallback went to layer 8 and JS drew numbers but the overlay was not visible.
+            super(FlyingDamageWindow, self).__init__(
+                wndFlags=WindowFlags.WINDOW,
+                content=FlyingDamageView()
+            )
+            logger.info('[FlyingDamageGF] CustomHPBar-style WindowImpl layer7 path')
 else:
     FlyingDamageWindow = None
 
