@@ -11,6 +11,7 @@ package com.flyingdamage
         public var py_getScreenPos:Function = null;
         public var py_projectWorld:Function = null;
         public var py_pullDamageText:Function = null;
+        public var py_ackDamage:Function = null;
         public var py_log:Function = null;
 
         private var _layer:DamageLayer = null;
@@ -18,8 +19,10 @@ package com.flyingdamage
         private var _debugShown:int = 0;
         private var _positionLogged:Boolean = false;
         private var _pullLogged:int = 0;
+        private var _ackLogged:int = 0;
         private var _projectLog:int = 0;
         private var _emptyPollLogged:Boolean = false;
+        private var _seen:Object = {};
 
         public function FlyingDamageApp()
         {
@@ -59,7 +62,7 @@ package com.flyingdamage
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
-            log("as_populate diagnostics started rootChildren=" + numChildren + " layer=" + _layer);
+            log("as_populate ACK polling diagnostics started rootChildren=" + numChildren + " layer=" + _layer);
         }
 
         public function as_showDamageScreen(x:Number, y:Number, damage:int,
@@ -141,13 +144,12 @@ package com.flyingdamage
             {
                 _layer.showVehicleDamage(vehicleID, fx, fy, damage, colorRGB, fontSize, alpha, riseMeters, life);
                 _debugShown++;
-                if (_debugShown <= 120)
+                if (_debugShown <= 160)
                     log("EXIT as_showDamageVehicle vid=" + vehicleID + " d=" + damage + " rootChildren=" + numChildren + " layerChildren=" + _layer.numChildren);
             }
             catch (e:Error)
             {
                 log("as_showDamageVehicle error: " + e.message);
-                // emergency fallback: still try screen-fixed drawing
                 try { _layer.showScreenDamage(fx, fy, damage, colorRGB, fontSize, alpha, 70, life); }
                 catch (e2:Error) { log("as_showDamageVehicle emergency fallback error: " + e2.message); }
             }
@@ -176,6 +178,7 @@ package com.flyingdamage
             py_getScreenPos = null;
             py_projectWorld = null;
             py_pullDamageText = null;
+            py_ackDamage = null;
             py_log = null;
         }
 
@@ -245,7 +248,7 @@ package com.flyingdamage
             if (!_positionLogged)
             {
                 _positionLogged = true;
-                log("root 0,0 diagnostics; stage=" + _stageW() + "x" + _stageH() + " visible=" + visible + " alpha=" + alpha);
+                log("root 0,0 ACK diagnostics; stage=" + _stageW() + "x" + _stageH() + " visible=" + visible + " alpha=" + alpha);
             }
         }
 
@@ -296,15 +299,39 @@ package com.flyingdamage
             if (data == null || data.length == 0)
                 return;
 
-            if (_pullLogged < 30)
+            if (_pullLogged < 60)
             {
                 _pullLogged++;
-                log("pulled damage data: " + data);
+                log("pulled ACK damage data: " + data);
             }
 
             var rows:Array = data.split("\n");
             for each (var row:String in rows)
                 _parseDamageRow(row);
+        }
+
+        private function _ack(qid:int):void
+        {
+            try
+            {
+                if (py_ackDamage != null)
+                {
+                    py_ackDamage(qid);
+                    if (_ackLogged < 80)
+                    {
+                        _ackLogged++;
+                        log("ACK sent id=" + qid);
+                    }
+                }
+                else
+                {
+                    log("ACK unavailable id=" + qid);
+                }
+            }
+            catch (e:Error)
+            {
+                log("ACK error id=" + qid + " msg=" + e.message);
+            }
         }
 
         private function _parseDamageRow(row:String):void
@@ -313,33 +340,50 @@ package com.flyingdamage
                 return;
 
             var p:Array = row.split("|");
+            if (p.length < 2)
+                return;
+
+            var qid:int = int(p[0]);
+            if (qid <= 0)
+                return;
+            if (_seen[qid])
+                return;
+
             try
             {
-                if (p[0] == "N" && p.length >= 9)
+                if (p[1] == "N" && p.length >= 10)
                 {
-                    as_showDamageNormalized(Number(p[1]), Number(p[2]), int(p[3]), uint(p[4]),
-                                            int(p[5]), Number(p[6]), Number(p[7]), Number(p[8]));
+                    as_showDamageNormalized(Number(p[2]), Number(p[3]), int(p[4]), uint(p[5]),
+                                            int(p[6]), Number(p[7]), Number(p[8]), Number(p[9]));
+                    _seen[qid] = true;
+                    _ack(qid);
                 }
-                else if (p[0] == "S" && p.length >= 9)
+                else if (p[1] == "S" && p.length >= 10)
                 {
-                    as_showDamageScreen(Number(p[1]), Number(p[2]), int(p[3]), uint(p[4]),
-                                        int(p[5]), Number(p[6]), Number(p[7]), Number(p[8]));
+                    as_showDamageScreen(Number(p[2]), Number(p[3]), int(p[4]), uint(p[5]),
+                                        int(p[6]), Number(p[7]), Number(p[8]), Number(p[9]));
+                    _seen[qid] = true;
+                    _ack(qid);
                 }
-                else if (p[0] == "W" && p.length >= 12)
+                else if (p[1] == "W" && p.length >= 13)
                 {
-                    as_showDamageWorld(Number(p[1]), Number(p[2]), Number(p[3]),
-                                       Number(p[4]), Number(p[5]), int(p[6]), uint(p[7]),
-                                       int(p[8]), Number(p[9]), Number(p[10]), Number(p[11]));
+                    as_showDamageWorld(Number(p[2]), Number(p[3]), Number(p[4]),
+                                       Number(p[5]), Number(p[6]), int(p[7]), uint(p[8]),
+                                       int(p[9]), Number(p[10]), Number(p[11]), Number(p[12]));
+                    _seen[qid] = true;
+                    _ack(qid);
                 }
-                else if (p[0] == "V" && p.length >= 10)
+                else if (p[1] == "V" && p.length >= 11)
                 {
-                    as_showDamageVehicle(int(p[1]), Number(p[2]), Number(p[3]), int(p[4]), uint(p[5]),
-                                         int(p[6]), Number(p[7]), Number(p[8]), Number(p[9]));
+                    as_showDamageVehicle(int(p[2]), Number(p[3]), Number(p[4]), int(p[5]), uint(p[6]),
+                                         int(p[7]), Number(p[8]), Number(p[9]), Number(p[10]));
+                    _seen[qid] = true;
+                    _ack(qid);
                 }
             }
             catch (e:Error)
             {
-                log("parse damage row error: " + e.message + " row=" + row);
+                log("parse ACK damage row error: " + e.message + " row=" + row);
             }
         }
 
