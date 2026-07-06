@@ -11,13 +11,9 @@ package com.flyingdamage
     /**
      * One damage number.
      *
-     * World mode: starts from a captured 3D world point over the damaged tank
-     * and rises in world-space meters. The screen position is projected every
-     * frame. This avoids the old bug where the number followed the vehicle
-     * object / overlay incorrectly.
-     *
-     * Screen mode: fallback that freezes the starting screen point and rises in
-     * screen pixels.
+     * Screen mode is the safe/default mode: fixed start screen x/y, then rise.
+     * World mode is experimental. If world projection fails, the number falls
+     * back to the captured screen point instead of being deleted immediately.
      */
     public class FloatingNumber extends Sprite
     {
@@ -34,6 +30,7 @@ package com.flyingdamage
         private var _wx:Number;
         private var _wy:Number;
         private var _wz:Number;
+        private var _worldFailed:Boolean = false;
 
         private static const DEFAULT_LIFETIME:Number = 1.6;
         private static const DEFAULT_RISE:Number = 55.0;
@@ -65,7 +62,7 @@ package com.flyingdamage
             _tf.background = false;
             _tf.border = false;
             _tf.type = TextFieldType.DYNAMIC;
-            _tf.defaultTextFormat = new TextFormat("$TitleFont", int(data.size), uint(data.color), true);
+            _tf.defaultTextFormat = new TextFormat("Arial", int(data.size), uint(data.color), true);
             _tf.text = String(int(data.dmg));
             _tf.x = -_tf.textWidth / 2.0;
             _tf.y = -_tf.textHeight / 2.0;
@@ -86,18 +83,27 @@ package com.flyingdamage
 
             var progress:Number = age / _lifeTime;
 
-            if (_mode == "world")
+            if (_mode == "world" && !_worldFailed)
             {
                 var pos:Object = _app.projectWorld(_wx, _wy + _rise * progress, _wz);
-                if (pos == null || !pos.ok)
-                    return false;
-                this.x = Number(pos.x);
-                this.y = Number(pos.y);
+                if (pos != null && pos.ok)
+                {
+                    this.x = Number(pos.x);
+                    this.y = Number(pos.y);
+                }
+                else
+                {
+                    // Do NOT delete the number. Fall back to the hit-time screen
+                    // point so the player still sees damage.
+                    _worldFailed = true;
+                    this.x = _startX;
+                    this.y = _startY - DEFAULT_RISE * progress;
+                }
             }
             else
             {
                 this.x = _startX;
-                this.y = _startY - _rise * progress;
+                this.y = _startY - DEFAULT_RISE * progress;
             }
 
             if (progress < FADE_START)
