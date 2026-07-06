@@ -7,21 +7,23 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * Items can be animated in two modes:
-     *   - screen: fixed screen x/y fallback.
-     *   - world: fixed world x/y/z captured at hit time; every frame the SWF
-     *            asks Python to project that world point. This behaves much
-     *            closer to XVM marker damage than a free overlay.
+     * Damage can arrive in two ways:
+     *   1) direct Python -> AS3 call: as_showDamage(data)
+     *   2) fallback pull queue: py_pullDamage()
+     *
+     * Direct push is preferred because some Scaleform external components do not
+     * reliably execute polling callbacks every frame in battle.
      */
     public class FlyingDamageApp extends Sprite
     {
-        public var py_getScreenPos:Function = null;   // legacy compatibility
+        public var py_getScreenPos:Function = null;
         public var py_projectWorld:Function = null;
         public var py_pullDamage:Function = null;
         public var py_log:Function = null;
 
         private var _layer:DamageLayer = null;
         private var _timer:Timer = null;
+        private var _debugShown:int = 0;
 
         public function FlyingDamageApp()
         {
@@ -35,11 +37,29 @@ package com.flyingdamage
             _ensureLayer();
             if (_timer == null)
             {
-                _timer = new Timer(16);  // ~60 fps
+                _timer = new Timer(16);
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
             log("as_populate (timer started)");
+        }
+
+        public function as_showDamage(data:Object):void
+        {
+            _ensureLayer();
+            if (data == null)
+                return;
+            try
+            {
+                _layer.showDamage(data);
+                _debugShown++;
+                if (_debugShown <= 8)
+                    log("as_showDamage d=" + data.dmg + " mode=" + data.mode + " x=" + data.x + " y=" + data.y);
+            }
+            catch (e:Error)
+            {
+                log("as_showDamage error: " + e.message);
+            }
         }
 
         public function as_clear():void
@@ -108,10 +128,7 @@ package com.flyingdamage
                     if (list != null && list.length > 0)
                     {
                         for (var i:int = 0; i < list.length; i++)
-                        {
-                            var d:Object = list[i];
-                            _layer.showDamage(d);
-                        }
+                            as_showDamage(list[i]);
                     }
                 }
                 catch (err:Error)
