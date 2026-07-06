@@ -9,15 +9,12 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * GUI.Flash is centered by its SWF dimensions. The root sprite is shifted so
-     * the 800x600 SWF can cover the real screen. Therefore all screen pixel
-     * coordinates from Python must be converted to this corrected local space.
+     * On the current WoT client stage.stageWidth/stage.stageHeight already match
+     * the real screen size. Root shifting makes objects disappear, so this build
+     * uses native stage/screen coordinates directly.
      */
     public class FlyingDamageApp extends Sprite
     {
-        private static const SWF_HALF_WIDTH:Number = 400.0;
-        private static const SWF_HALF_HEIGHT:Number = 300.0;
-
         public var py_getScreenPos:Function = null;
         public var py_projectWorld:Function = null;
         public var py_pullDamageText:Function = null;
@@ -29,10 +26,13 @@ package com.flyingdamage
         private var _selfTestShown:Boolean = false;
         private var _positionLogged:Boolean = false;
         private var _pullLogged:int = 0;
+        private var _emptyPollLogged:Boolean = false;
 
         public function FlyingDamageApp()
         {
             super();
+            x = 0;
+            y = 0;
             mouseEnabled = false;
             mouseChildren = false;
         }
@@ -59,13 +59,11 @@ package com.flyingdamage
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
-            log("as_populate (timer started, polling queue)");
+            log("as_populate (timer started, no root shift, polling queue)");
 
             if (!_selfTestShown)
             {
                 _selfTestShown = true;
-                // Show near the real screen centre. as_showDamageScreen converts
-                // this screen-space point to SWF-local coordinates.
                 as_showDamageScreen(stage != null ? stage.stageWidth / 2.0 : 1280,
                                     stage != null ? stage.stageHeight / 2.0 : 684,
                                     8888, 0x00FFFF, 42, 1.0, 80, 4.0);
@@ -81,12 +79,10 @@ package com.flyingdamage
             _updateAppPosition();
             try
             {
-                var lx:Number = _screenToLocalX(x);
-                var ly:Number = _screenToLocalY(y);
-                _layer.showScreenDamage(lx, ly, damage, colorRGB, fontSize, alpha, rise, life);
+                _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 24)
-                    log("as_showDamageScreen d=" + damage + " screen=(" + x + "," + y + ") local=(" + lx + "," + ly + ") root=(" + this.x + "," + this.y + ")");
+                if (_debugShown <= 30)
+                    log("as_showDamageScreen d=" + damage + " screen=(" + x + "," + y + ") root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
@@ -104,13 +100,11 @@ package com.flyingdamage
             _updateAppPosition();
             try
             {
-                var lx:Number = _screenToLocalX(fallbackX);
-                var ly:Number = _screenToLocalY(fallbackY);
-                _layer.showWorldDamage(wx, wy, wz, lx, ly, damage,
+                _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
                                        colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 24)
-                    log("as_showDamageWorld d=" + damage + " screen=(" + fallbackX + "," + fallbackY + ") local=(" + lx + "," + ly + ") root=(" + this.x + "," + this.y + ")");
+                if (_debugShown <= 30)
+                    log("as_showDamageWorld d=" + damage + " screen=(" + fallbackX + "," + fallbackY + ") root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
@@ -148,16 +142,7 @@ package com.flyingdamage
         {
             if (py_projectWorld == null)
                 return null;
-            try
-            {
-                var pos:Object = py_projectWorld(wx, wy, wz);
-                if (pos != null && pos.ok)
-                {
-                    pos.x = _screenToLocalX(Number(pos.x));
-                    pos.y = _screenToLocalY(Number(pos.y));
-                }
-                return pos;
-            }
+            try { return py_projectWorld(wx, wy, wz); }
             catch (e:Error) {}
             return null;
         }
@@ -173,29 +158,16 @@ package com.flyingdamage
 
         private function _updateAppPosition():void
         {
-            if (stage == null)
-                return;
-
-            var sw:Number = stage.stageWidth;
-            var sh:Number = stage.stageHeight;
-            this.x = SWF_HALF_WIDTH - (sw / 2.0);
-            this.y = SWF_HALF_HEIGHT - (sh / 2.0);
-
+            this.x = 0;
+            this.y = 0;
             if (!_positionLogged)
             {
                 _positionLogged = true;
-                log("root corrected to x=" + this.x + " y=" + this.y + " for screen=" + sw + "x" + sh);
+                if (stage != null)
+                    log("root forced to 0,0 for screen=" + stage.stageWidth + "x" + stage.stageHeight);
+                else
+                    log("root forced to 0,0");
             }
-        }
-
-        private function _screenToLocalX(screenX:Number):Number
-        {
-            return screenX - this.x;
-        }
-
-        private function _screenToLocalY(screenY:Number):Number
-        {
-            return screenY - this.y;
         }
 
         private function onTick(e:TimerEvent):void
@@ -210,7 +182,14 @@ package com.flyingdamage
         private function _pullDamageQueue():void
         {
             if (py_pullDamageText == null)
+            {
+                if (!_emptyPollLogged)
+                {
+                    _emptyPollLogged = true;
+                    log("py_pullDamageText is null");
+                }
                 return;
+            }
 
             var data:String = "";
             try { data = String(py_pullDamageText()); }
@@ -223,7 +202,7 @@ package com.flyingdamage
             if (data == null || data.length == 0)
                 return;
 
-            if (_pullLogged < 20)
+            if (_pullLogged < 30)
             {
                 _pullLogged++;
                 log("pulled damage data: " + data);
@@ -231,9 +210,7 @@ package com.flyingdamage
 
             var rows:Array = data.split("\n");
             for each (var row:String in rows)
-            {
                 _parseDamageRow(row);
-            }
         }
 
         private function _parseDamageRow(row:String):void
