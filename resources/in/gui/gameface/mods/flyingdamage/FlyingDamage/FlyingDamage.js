@@ -37,15 +37,33 @@
             root.id = 'fd-root';
             document.body.appendChild(root);
         }
+        if (root) {
+            root.style.position = 'absolute';
+            root.style.left = '0px';
+            root.style.top = '0px';
+            root.style.width = '4096px';
+            root.style.height = '2160px';
+            root.style.overflow = 'visible';
+            root.style.pointerEvents = 'none';
+            root.style.zIndex = '2147483647';
+        }
+        if (document.body) {
+            document.body.style.overflow = 'visible';
+            document.body.style.background = 'transparent';
+        }
+        if (document.documentElement) {
+            document.documentElement.style.overflow = 'visible';
+            document.documentElement.style.background = 'transparent';
+        }
         return !!root;
     }
 
     function viewportW() {
-        return Math.max(1, window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth || 2560);
+        return Math.max(1, window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth || 256);
     }
 
     function viewportH() {
-        return Math.max(1, window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight || 1369);
+        return Math.max(1, window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight || 256);
     }
 
     function addDamage(ev) {
@@ -53,12 +71,14 @@
 
         var vw = viewportW();
         var vh = viewportH();
-        var sw = Math.max(1, num(ev.sw, vw));
-        var sh = Math.max(1, num(ev.sh, vh));
-        var sx = vw / sw;
-        var sy = vh / sh;
-        var x = clamp(num(ev.x, vw * 0.5) * sx, 8, vw - 8);
-        var y = clamp(num(ev.y, vh * 0.5) * sy, 8, vh - 8);
+        var sw = Math.max(1, num(ev.sw, 2560));
+        var sh = Math.max(1, num(ev.sh, 1369));
+
+        // Layer 7 Gameface windows in this client can report only 256x256,
+        // but Python gives real screen coordinates. Keep those coordinates;
+        // do not scale them down to 256x256.
+        var x = clamp(num(ev.x, sw * 0.5), -2000, sw + 2000);
+        var y = clamp(num(ev.y, sh * 0.5), -2000, sh + 2000);
 
         var el = document.createElement('div');
         el.className = 'fd-damage';
@@ -66,22 +86,23 @@
         el.style.left = x + 'px';
         el.style.top = y + 'px';
         el.style.color = colorFromInt(ev.color);
-        el.style.fontSize = Math.max(18, num(ev.size, 28)) + 'px';
-        el.style.opacity = Math.max(0.15, Math.min(1, num(ev.alpha, 1)));
-        el.style.animationDuration = Math.max(0.6, num(ev.life, 1.6)) + 's';
+        el.style.fontSize = Math.max(24, num(ev.size, 34)) + 'px';
+        el.style.opacity = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
+        el.style.animationDuration = Math.max(0.8, num(ev.life, 1.6)) + 's';
+        el.style.zIndex = '2147483647';
         root.appendChild(el);
 
-        log('draw dmg=' + el.textContent + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh);
+        log('draw dmg=' + el.textContent + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh + ' screen=' + sw + 'x' + sh);
 
         window.setTimeout(function () {
             if (el && el.parentNode) el.parentNode.removeChild(el);
-        }, Math.max(700, num(ev.life, 1.6) * 1000 + 300));
+        }, Math.max(900, num(ev.life, 1.6) * 1000 + 500));
     }
 
     function showBootMarker() {
         if (bootShown) return;
         bootShown = true;
-        addDamage({ id: -1, x: 110, y: 90, sw: 2560, sh: 1369, dmg: 'FD', color: 0x66FF66, size: 30, alpha: 1, life: 4.0 });
+        addDamage({ id: -1, x: 1280, y: 180, sw: 2560, sh: 1369, dmg: 9999, color: 0x66FF66, size: 54, alpha: 1, life: 8.0 });
     }
 
     function getRawPayload() {
@@ -134,6 +155,7 @@
     }
 
     function initialize() {
+        ensureRoot();
         log('initialize view=' + viewportW() + 'x' + viewportH() + ' root=' + !!root);
         showBootMarker();
         tick();
