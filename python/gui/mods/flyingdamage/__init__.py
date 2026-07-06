@@ -1,252 +1,211 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Native GUI renderer for FlyingDamage.
+# Battle marker-layer renderer for FlyingDamage.
 #
-# The earlier ExternalFlashComponent path logged correctly but did not render in
-# this WoT battle layer. This build draws floating damage directly with native
-# BigWorld GUI.Window + GUI.Text components, so it does not depend on a separate
-# SWF being visible.
+# All previous overlay approaches created/logged correctly but were not visible
+# for the user. This build renders through the game's own markers2d canvas by
+# creating short-lived VehicleMarker symbols bound to world matrices.
 
 import logging
 
 import BigWorld
-import GUI
+import Math
 
 from PlayerEvents import g_playerEvents
 
 logger = logging.getLogger(__name__)
 
-try:
-    from gui import g_guiResetters
-except Exception:
-    g_guiResetters = None
-
-_SWF_NAME = 'FlyingDamageApp.swf'  # kept only for package compatibility
 _pushLog = [0]
 _testLog = [False]
+_markerParent = [None]
+_markerPlugin = [None]
+_markerIDs = set()
+_markerHookInstalled = [False]
 
 
-def _screen_size():
+def _installMarkerLayerHook():
+    if _markerHookInstalled[0]:
+        return
     try:
-        sw, sh = GUI.screenResolution()[:2]
-        sw = float(sw)
-        sh = float(sh)
-        if sw <= 0.0 or sh <= 0.0:
-            return 1920.0, 1080.0
-        return sw, sh
+        from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
     except Exception:
-        return 1920.0, 1080.0
+        logger.error('[FlyingDamage] cannot import VehicleMarkerPlugin', exc_info=True)
+        return
 
+    oldStart = VehicleMarkerPlugin.start
+    oldStop = VehicleMarkerPlugin.stop
 
-def _color_fmt(colorRGB, alpha=1.0):
-    try:
-        rgb = int(colorRGB) & 0xFFFFFF
-    except Exception:
-        rgb = 0xFFFFFF
-    try:
-        a = int(max(0.0, min(1.0, float(alpha))) * 255.0)
-    except Exception:
-        a = 255
-    return '\\c%06X%02X;' % (rgb, a)
-
-
-class _NativeDamageNumber(object):
-
-    def __init__(self, manager, x, y, damage, colorRGB, fontSize, alpha,
-                 risePixels, lifeTime, world=None, riseMeters=1.35):
-        self.manager = manager
-        self.startX = float(x)
-        self.startY = float(y)
-        self.damage = int(damage)
-        self.colorRGB = int(colorRGB) & 0xFFFFFF
-        self.baseAlpha = max(0.0, min(1.0, float(alpha)))
-        self.risePixels = float(risePixels)
-        self.lifeTime = max(0.15, float(lifeTime))
-        self.world = world
-        self.riseMeters = float(riseMeters)
-        self.started = BigWorld.time()
-        self.window = None
-        self.shadow = None
-        self.label = None
-        self._create(int(fontSize))
-
-    def _fontName(self, fontSize):
-        # WoT font names are fixed resources; native GUI.Text does not use point
-        # size directly. Pick a larger stock font for bigger configured numbers.
-        if fontSize >= 34:
-            return 'default_large.font'
-        return 'default_medium.font'
-
-    def _create(self, fontSize):
+    def newStart(self, *args, **kwargs):
+        result = oldStart(self, *args, **kwargs)
         try:
-            self.window = GUI.Window('')
-            self.window.materialFX = 'BLEND'
-            self.window.verticalAnchor = 'TOP'
-            self.window.horizontalAnchor = 'LEFT'
-            self.window.horizontalPositionMode = 'PIXEL'
-            self.window.verticalPositionMode = 'PIXEL'
-            self.window.heightMode = 'PIXEL'
-            self.window.widthMode = 'PIXEL'
-            self.window.width = 220
-            self.window.height = 90
-            self.window.visible = True
-
-            GUI.addRoot(self.window)
-
-            font = self._fontName(fontSize)
-            self.shadow = GUI.Text('')
-            self._installText(self.shadow, font)
-            self.label = GUI.Text('')
-            self._installText(self.label, font)
-            self.setText(self.damage, self.baseAlpha)
-            self.update()
+            _markerParent[0] = self._parentObj
+            _markerPlugin[0] = self
+            logger.info('[FlyingDamage] marker layer captured: %s', _markerParent[0])
         except Exception:
-            logger.error('[FlyingDamage] native number create failed', exc_info=True)
-            self.dispose()
+            logger.error('[FlyingDamage] marker layer capture failed', exc_info=True)
+        return result
 
-    def _installText(self, item, font):
-        item.font = font
-        item.verticalAnchor = 'TOP'
-        item.horizontalAnchor = 'CENTER'
-        item.horizontalPositionMode = 'PIXEL'
-        item.verticalPositionMode = 'PIXEL'
-        item.position = (self.window.width / 2, 0, 1)
-        item.colourFormatting = True
-        item.visible = True
-        self.window.addChild(item)
-
-    def setText(self, damage, alpha):
-        text = str(int(damage))
+    def newStop(self, *args, **kwargs):
         try:
-            self.shadow.text = '\\c000000%02X;%s' % (int(alpha * 255.0), text)
-            self.label.text = _color_fmt(self.colorRGB, alpha) + text
-            # Offset shadow slightly down/right by moving its child position.
-            self.shadow.position = (self.window.width / 2 + 2, 2, 1)
-            self.label.position = (self.window.width / 2, 0, 1)
+            if _markerPlugin[0] is self:
+                _destroyAllMarkerDamage()
+                _markerParent[0] = None
+                _markerPlugin[0] = None
+                logger.info('[FlyingDamage] marker layer released')
         except Exception:
-            pass
+            logger.error('[FlyingDamage] marker layer release failed', exc_info=True)
+        return oldStop(self, *args, **kwargs)
 
-    def _projectWorld(self, progress):
-        if self.world is None:
+    VehicleMarkerPlugin.start = newStart
+    VehicleMarkerPlugin.stop = newStop
+    _markerHookInstalled[0] = True
+    logger.info('[FlyingDamage] VehicleMarkerPlugin hook installed')
+
+
+def _destroyMarker(markerID):
+    parent = _markerParent[0]
+    try:
+        if parent is not None:
+            parent.destroyMarker(markerID)
+    except Exception:
+        logger.error('[FlyingDamage] destroy marker failed id=%s', markerID, exc_info=True)
+    try:
+        _markerIDs.discard(markerID)
+    except Exception:
+        pass
+
+
+def _destroyAllMarkerDamage():
+    for markerID in list(_markerIDs):
+        _destroyMarker(markerID)
+    try:
+        _markerIDs.clear()
+    except Exception:
+        pass
+
+
+def _makeMatrix(x, y, z):
+    m = Math.Matrix()
+    m.setTranslate(Math.Vector3(float(x), float(y), float(z)))
+    return m
+
+
+def _entityAnchorFromVehicleID(vehicleID):
+    try:
+        vehicle = BigWorld.entity(int(vehicleID))
+        if vehicle is None:
             return None
-        try:
-            from .hooks import projectWorldPoint
-            wx, wy, wz = self.world
-            pos = projectWorldPoint(wx, wy + self.riseMeters * progress, wz)
-            if pos and pos.get('ok'):
-                return float(pos.get('x', self.startX)), float(pos.get('y', self.startY))
-        except Exception:
-            pass
+        pos = getattr(vehicle, 'position', None)
+        if pos is None:
+            tmp = Math.Matrix()
+            tmp.set(vehicle.matrix)
+            pos = tmp.translation
+        return (float(pos.x), float(pos.y) + 4.5, float(pos.z))
+    except Exception:
         return None
 
-    def update(self):
-        try:
-            now = BigWorld.time()
-            age = now - self.started
-            if age >= self.lifeTime:
-                return False
-            progress = age / self.lifeTime
 
-            worldPos = self._projectWorld(progress)
-            if worldPos is not None:
-                x, y = worldPos
-            else:
-                x = self.startX
-                y = self.startY - self.risePixels * progress
-
-            fadeStart = 0.55
-            if progress <= fadeStart:
-                alpha = self.baseAlpha
-            else:
-                alpha = self.baseAlpha * (1.0 - (progress - fadeStart) / (1.0 - fadeStart))
-                if alpha < 0.0:
-                    alpha = 0.0
-            self.setText(self.damage, alpha)
-
-            if self.window is not None:
-                self.window.position = (x - self.window.width / 2, y - self.window.height / 2, 1)
-                self.window.visible = True
-            return True
-        except Exception:
-            logger.error('[FlyingDamage] native number update failed', exc_info=True)
-            return False
-
-    def dispose(self):
-        try:
-            if self.window is not None:
-                GUI.delRoot(self.window)
-        except Exception:
-            pass
-        self.window = None
-        self.shadow = None
-        self.label = None
+def _playerAnchor():
+    try:
+        player = BigWorld.player()
+        vid = getattr(player, 'playerVehicleID', None)
+        if vid is None:
+            vid = getattr(player, 'vehicleID', None)
+        anchor = _entityAnchorFromVehicleID(vid)
+        if anchor is not None:
+            return anchor
+    except Exception:
+        pass
+    try:
+        for entity in BigWorld.entities.values():
+            if hasattr(entity, 'isStarted') and getattr(entity, 'isStarted', False):
+                pos = getattr(entity, 'position', None)
+                if pos is not None:
+                    return (float(pos.x), float(pos.y) + 4.5, float(pos.z))
+    except Exception:
+        pass
+    return None
 
 
-class _NativeDamageRenderer(object):
+class _MarkerLayerRenderer(object):
 
     def __init__(self):
-        self.items = []
-        self._cb = None
         self.enabled = False
 
     def start(self):
         self.enabled = True
-        self._schedule()
-        logger.info('[FlyingDamage] native GUI renderer started')
+        logger.info('[FlyingDamage] marker-layer renderer started')
 
     def stop(self):
         self.enabled = False
-        if self._cb is not None:
-            try:
-                BigWorld.cancelCallback(self._cb)
-            except Exception:
-                pass
-            self._cb = None
-        for item in list(self.items):
-            item.dispose()
-        del self.items[:]
-        logger.info('[FlyingDamage] native GUI renderer stopped')
-
-    def _schedule(self):
-        if not self.enabled or self._cb is not None:
-            return
-        self._cb = BigWorld.callback(0.016, self._tick)
-
-    def _tick(self):
-        self._cb = None
-        if not self.enabled:
-            return
-        alive = []
-        for item in list(self.items):
-            if item.update():
-                alive.append(item)
-            else:
-                item.dispose()
-        self.items = alive
-        self._schedule()
-
-    def showScreen(self, x, y, damage, colorRGB, fontSize, alpha, risePixels, lifeTime):
-        item = _NativeDamageNumber(self, x, y, damage, colorRGB, fontSize, alpha,
-                                   risePixels, lifeTime)
-        if item.window is not None:
-            self.items.append(item)
-            if _pushLog[0] < 30:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] native show screen d=%s x=%.1f y=%.1f items=%d',
-                            int(damage), float(x), float(y), len(self.items))
+        _destroyAllMarkerDamage()
+        logger.info('[FlyingDamage] marker-layer renderer stopped')
 
     def showWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                   fontSize, alpha, riseMeters, lifeTime):
-        item = _NativeDamageNumber(self, fallbackX, fallbackY, damage, colorRGB,
-                                   fontSize, alpha, 55.0, lifeTime,
-                                   world=(float(wx), float(wy), float(wz)),
-                                   riseMeters=riseMeters)
-        if item.window is not None:
-            self.items.append(item)
-            if _pushLog[0] < 30:
+        if not self.enabled:
+            return False
+        parent = _markerParent[0]
+        if parent is None:
+            logger.info('[FlyingDamage] marker layer not ready; cannot show d=%s', int(damage))
+            return False
+        try:
+            from gui.Scaleform.daapi.view.battle.shared.markers2d import settings as markerSettings
+
+            markerID = parent.createMarker(
+                markerSettings.MARKER_SYMBOL_NAME.VEHICLE_MARKER,
+                matrixProvider=_makeMatrix(wx, wy, wz),
+                active=True,
+                markerType=markerSettings.CommonMarkerType.VEHICLE)
+            _markerIDs.add(markerID)
+
+            txt = str(int(damage))
+            maxHP = max(int(damage), 1)
+            try:
+                parent.setMarkerTextLabelEnabled(markerID, True)
+            except Exception:
+                pass
+            try:
+                parent.setMarkerCustomDistanceStr(markerID, txt)
+            except Exception:
+                pass
+            try:
+                parent.invokeMarker(markerID, 'setVehicleInfo',
+                                    'mediumTank', '', txt, 10,
+                                    txt, txt, '', '', maxHP,
+                                    'enemy', False, 0, '')
+                parent.invokeMarker(markerID, 'setHealth', maxHP)
+                parent.invokeMarker(markerID, 'update')
+            except Exception:
+                logger.error('[FlyingDamage] init temp vehicle marker failed', exc_info=True)
+
+            if _pushLog[0] < 40:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] native show world d=%s fallback=(%.1f,%.1f) items=%d',
-                            int(damage), float(fallbackX), float(fallbackY), len(self.items))
+                logger.info('[FlyingDamage] MARKER_LAYER show d=%s markerID=%s world=(%.2f,%.2f,%.2f)',
+                            int(damage), markerID, float(wx), float(wy), float(wz))
+
+            self._animateMarker(markerID, float(wx), float(wy), float(wz),
+                                float(riseMeters), max(0.5, float(lifeTime)), BigWorld.time())
+            return True
+        except Exception:
+            logger.error('[FlyingDamage] marker-layer show failed', exc_info=True)
+            return False
+
+    def _animateMarker(self, markerID, wx, wy, wz, riseMeters, lifeTime, started):
+        parent = _markerParent[0]
+        if parent is None or markerID not in _markerIDs:
+            return
+        try:
+            age = BigWorld.time() - started
+            if age >= lifeTime:
+                _destroyMarker(markerID)
+                return
+            p = age / lifeTime
+            parent.setMarkerMatrix(markerID, _makeMatrix(wx, wy + riseMeters * p, wz))
+            BigWorld.callback(0.05, lambda: self._animateMarker(markerID, wx, wy, wz, riseMeters, lifeTime, started))
+        except Exception:
+            logger.error('[FlyingDamage] marker-layer animate failed id=%s', markerID, exc_info=True)
+            _destroyMarker(markerID)
 
 
 class Controller(object):
@@ -254,10 +213,11 @@ class Controller(object):
     def __init__(self):
         self._enabled = True
         self._battleMode = False
-        self._renderer = _NativeDamageRenderer()
+        self._renderer = _MarkerLayerRenderer()
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (native GUI renderer)')
+        logger.info('[FlyingDamage] controller.init begin (vehicle marker layer)')
+        _installMarkerLayerHook()
         try:
             from .settings.config import g_config
             g_config.registerSettings()
@@ -278,12 +238,6 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] early suppression failed', exc_info=True)
 
-        try:
-            if g_guiResetters is not None:
-                g_guiResetters.add(self._onScreenReset)
-        except Exception:
-            pass
-
         g_playerEvents.onAvatarReady += self._onAvatarReady
         g_playerEvents.onAvatarBecomeNonPlayer += self._onBattleLeave
         logger.info('[FlyingDamage] controller.init done')
@@ -295,11 +249,6 @@ class Controller(object):
             g_playerEvents.onAvatarBecomeNonPlayer -= self._onBattleLeave
         except Exception:
             pass
-        try:
-            if g_guiResetters is not None:
-                g_guiResetters.discard(self._onScreenReset)
-        except Exception:
-            pass
         self._onBattleLeave()
         try:
             from .utils import restore_overrides
@@ -307,31 +256,36 @@ class Controller(object):
         except Exception:
             pass
 
-    def _onScreenReset(self):
-        # Active numbers use pixel coordinates captured from current resolution.
-        # New numbers will use the new screen size automatically.
-        logger.info('[FlyingDamage] screen reset native renderer')
-
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
         _testLog[0] = False
-        logger.info('[FlyingDamage] avatar ready -> native renderer active')
+        logger.info('[FlyingDamage] avatar ready -> marker-layer renderer active')
         self._renderer.start()
         try:
             from .hooks import setView
             setView(self)
         except Exception:
             pass
-        BigWorld.callback(1.0, self._debugTestDamage)
+        # Try several times because VehicleMarkerPlugin may start after avatar ready.
+        BigWorld.callback(2.0, self._debugTestDamage)
+        BigWorld.callback(5.0, self._debugTestDamage)
+        BigWorld.callback(8.0, self._debugTestDamage)
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def _debugTestDamage(self):
         if not self._battleMode or _testLog[0]:
             return
+        anchor = _playerAnchor()
+        if anchor is None:
+            logger.info('[FlyingDamage] marker-layer debug: no player/world anchor yet')
+            return
+        if _markerParent[0] is None:
+            logger.info('[FlyingDamage] marker-layer debug: marker parent not captured yet')
+            return
         _testLog[0] = True
-        sw, sh = _screen_size()
-        logger.info('[FlyingDamage] native debug test at center %.1f %.1f', sw / 2.0, sh / 2.0)
-        self.showDamageAt(sw / 2.0, sh / 2.0, 9999, 0x00FFFF, 36, 1.0, 90.0, 5.0)
+        wx, wy, wz = anchor
+        logger.info('[FlyingDamage] marker-layer debug test world=(%.2f,%.2f,%.2f)', wx, wy, wz)
+        self.showDamageWorld(wx, wy, wz, 0.0, 0.0, 9999, 0x00FFFF, 36, 1.0, 2.0, 5.0)
 
     def _installSuppressionSafe(self):
         try:
@@ -359,9 +313,11 @@ class Controller(object):
             pass
 
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
-        if not self._battleMode:
-            return
-        self._renderer.showScreen(x, y, damage, colorRGB, fontSize, alpha, risePixels, lifeTime)
+        # Screen overlay path is intentionally disabled for this build. We need a
+        # real world point so the game marker canvas can render it.
+        if _pushLog[0] < 10:
+            _pushLog[0] += 1
+            logger.info('[FlyingDamage] screen damage ignored by marker-layer renderer d=%s', int(damage))
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                         fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
