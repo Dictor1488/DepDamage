@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '3.6.4'
+        default: '3.7.0'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -24,12 +24,9 @@ permissions:
   contents: write
 
 env:
-  FLEX_VERSION: '4.16.1'
-  FLASH_PLAYER_VERSION: '32.0'
-  SWF_VERSION: '39'
   MOD_ID: 'com.author.flyingdamage'
   MOD_NAME: 'Flying Damage'
-  MOD_DESCRIPTION: 'Floating damage numbers above tanks. World-anchor / XVM-like projection mode, screen fallback, smooth rise + fade.'
+  MOD_DESCRIPTION: 'Gameface floating damage numbers above tanks. No AS3/SWF renderer.'
 
 jobs:
   build:
@@ -56,104 +53,6 @@ jobs:
           if (-not (Test-Path 'C:\Python27\python.exe')) { throw 'Python 2.7 not found at C:\Python27\python.exe' }
           & 'C:\Python27\python.exe' --version
 
-      - name: Install Java for Flex
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '11'
-
-      - name: Cache Flex SDK
-        id: cache-flex
-        uses: actions/cache@v4
-        with:
-          path: C:\flex-sdk
-          key: flex-sdk-${{ env.FLEX_VERSION }}-v7-fullsize-no-root-shift
-
-      - name: Download Apache Flex SDK
-        if: steps.cache-flex.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $urls = @(
-            "https://archive.apache.org/dist/flex/${{ env.FLEX_VERSION }}/binaries/apache-flex-sdk-${{ env.FLEX_VERSION }}-bin.zip",
-            "https://dlcdn.apache.org/flex/${{ env.FLEX_VERSION }}/binaries/apache-flex-sdk-${{ env.FLEX_VERSION }}-bin.zip"
-          )
-          $ok = $false
-          foreach ($url in $urls) {
-            try {
-              Write-Host "Downloading $url"
-              Invoke-WebRequest -Uri $url -OutFile flex-sdk.zip -UseBasicParsing -TimeoutSec 300
-              $ok = $true
-              break
-            } catch {
-              Write-Host "Failed: $_"
-            }
-          }
-          if (-not $ok) { throw 'Could not download Apache Flex SDK' }
-          New-Item -ItemType Directory -Force -Path C:\flex-sdk | Out-Null
-          Expand-Archive -Path flex-sdk.zip -DestinationPath C:\flex-sdk-temp -Force
-          $items = Get-ChildItem C:\flex-sdk-temp
-          if ($items.Count -eq 1 -and $items[0].PSIsContainer) {
-            Get-ChildItem $items[0].FullName | Move-Item -Destination C:\flex-sdk -Force
-          } else {
-            Get-ChildItem C:\flex-sdk-temp | Move-Item -Destination C:\flex-sdk -Force
-          }
-
-      - name: Setup playerglobal.swc
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $src = 'as3\libs\playerglobal.swc'
-          if (-not (Test-Path $src)) { throw "Missing $src" }
-          $playerDir = 'C:\flex-sdk\frameworks\libs\player\32.0'
-          New-Item -ItemType Directory -Force -Path $playerDir | Out-Null
-          Copy-Item $src "$playerDir\playerglobal.swc" -Force
-          Copy-Item $src 'C:\flex-sdk\frameworks\libs\player\playerglobal.swc' -Force
-          $cfg = 'C:\flex-sdk\frameworks\flex-config.xml'
-          if (Test-Path $cfg) {
-            (Get-Content $cfg -Raw) -replace '\{playerglobalHome\}', 'C:/flex-sdk/frameworks/libs/player' | Set-Content $cfg -Encoding UTF8
-          }
-
-      - name: Build FlyingDamageApp.swf
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $mxmlc = 'C:\flex-sdk\bin\mxmlc.bat'
-          if (-not (Test-Path $mxmlc)) { throw "mxmlc not found: $mxmlc" }
-          New-Item -ItemType Directory -Force -Path as3\bin | Out-Null
-
-          $args = @(
-            '-source-path+=as3\src_flash\src',
-            '-library-path+=as3\libs\playerglobal.swc',
-            '-external-library-path+=as3\libs\common-1.0-SNAPSHOT.swc',
-            '-external-library-path+=as3\libs\common_i18n_library-1.0-SNAPSHOT.swc',
-            '-external-library-path+=as3\libs\base_app-1.0-SNAPSHOT.swc',
-            '-external-library-path+=as3\libs\gui_base-1.0-SNAPSHOT.swc',
-            '-external-library-path+=as3\libs\gui_lobby-1.0-SNAPSHOT.swc',
-            '-external-library-path+=as3\libs\gui_battle-1.0-SNAPSHOT.swc',
-            '-external-library-path+=as3\libs\lobby.swc',
-            '-external-library-path+=as3\libs\battle.swc',
-            '-target-player=${{ env.FLASH_PLAYER_VERSION }}',
-            '-swf-version=${{ env.SWF_VERSION }}',
-            '-default-size=3840,2160',
-            '-strict=true',
-            '-optimize=true',
-            '-warnings=true',
-            '-output=as3\bin\FlyingDamageApp.swf',
-            'as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as'
-          )
-
-          & $mxmlc @args
-          if ($LASTEXITCODE -ne 0) { throw "mxmlc failed with exit code $LASTEXITCODE" }
-          if (-not (Test-Path as3\bin\FlyingDamageApp.swf)) { throw 'SWF was not created' }
-
-      - name: Copy SWF into resources
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path resources\in\gui\flash | Out-Null
-          Copy-Item as3\bin\FlyingDamageApp.swf resources\in\gui\flash\FlyingDamageApp.swf -Force
-          Get-Item resources\in\gui\flash\FlyingDamageApp.swf
-
       - name: Resolve version
         shell: pwsh
         run: |
@@ -164,7 +63,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '3.6.4'
+            $version = '3.7.0'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
@@ -192,7 +91,6 @@ jobs:
           path: |
             build/*.wotmod
             build/*.zip
-            as3/bin/FlyingDamageApp.swf
 
       - name: Create or update release
         if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
