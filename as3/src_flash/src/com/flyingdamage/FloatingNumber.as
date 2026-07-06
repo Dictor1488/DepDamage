@@ -1,7 +1,6 @@
 package com.flyingdamage
 {
     import flash.display.Sprite;
-    import flash.display.Shape;
     import flash.text.TextField;
     import flash.text.TextFormat;
     import flash.text.TextFieldAutoSize;
@@ -12,7 +11,6 @@ package com.flyingdamage
     public class FloatingNumber extends Sprite
     {
         private var _app:FlyingDamageApp;
-        private var _bg:Shape;
         private var _tf:TextField;
         private var _bornAt:int;
         private var _baseAlpha:Number;
@@ -25,7 +23,8 @@ package com.flyingdamage
         private var _wx:Number;
         private var _wy:Number;
         private var _wz:Number;
-        private var _worldFailed:Boolean = false;
+        private var _vehicleID:int;
+        private var _failed:Boolean = false;
 
         private static const DEFAULT_LIFETIME:Number = 1.6;
         private static const DEFAULT_RISE:Number = 55.0;
@@ -36,7 +35,7 @@ package com.flyingdamage
                                             fontSize:int, alpha:Number,
                                             rise:Number, life:Number):FloatingNumber
         {
-            return new FloatingNumber(app, "screen", x, y, 0, 0, 0, damage,
+            return new FloatingNumber(app, "screen", x, y, 0, 0, 0, 0, damage,
                                       colorRGB, fontSize, alpha, rise, life);
         }
 
@@ -46,13 +45,24 @@ package com.flyingdamage
                                            fontSize:int, alpha:Number,
                                            rise:Number, life:Number):FloatingNumber
         {
-            return new FloatingNumber(app, "world", fallbackX, fallbackY, wx, wy, wz,
+            return new FloatingNumber(app, "world", fallbackX, fallbackY, wx, wy, wz, 0,
                                       damage, colorRGB, fontSize, alpha, rise, life);
+        }
+
+        public static function createVehicle(app:FlyingDamageApp, vehicleID:int,
+                                             fallbackX:Number, fallbackY:Number,
+                                             damage:int, colorRGB:uint,
+                                             fontSize:int, alpha:Number,
+                                             riseMeters:Number, life:Number):FloatingNumber
+        {
+            return new FloatingNumber(app, "vehicle", fallbackX, fallbackY, 0, 0, 0, vehicleID,
+                                      damage, colorRGB, fontSize, alpha, riseMeters, life);
         }
 
         public function FloatingNumber(app:FlyingDamageApp, mode:String,
                                        startX:Number, startY:Number,
                                        wx:Number, wy:Number, wz:Number,
+                                       vehicleID:int,
                                        damage:int, colorRGB:uint,
                                        fontSize:int, baseAlpha:Number,
                                        rise:Number, life:Number)
@@ -64,6 +74,7 @@ package com.flyingdamage
             _wx = wx;
             _wy = wy;
             _wz = wz;
+            _vehicleID = vehicleID;
             _rise = isNaN(rise) ? DEFAULT_RISE : rise;
             _lifeTime = isNaN(life) ? DEFAULT_LIFETIME : life;
             if (_lifeTime <= 0.1) _lifeTime = DEFAULT_LIFETIME;
@@ -71,13 +82,6 @@ package com.flyingdamage
 
             _bornAt = getTimer();
             _baseAlpha = isNaN(baseAlpha) ? 1.0 : baseAlpha;
-
-            _bg = new Shape();
-            _bg.graphics.beginFill(0xFF00FF, 0.55);
-            _bg.graphics.lineStyle(2, 0xFFFFFF, 1.0);
-            _bg.graphics.drawRect(-42, -22, 84, 44);
-            _bg.graphics.endFill();
-            addChild(_bg);
 
             _tf = new TextField();
             _tf.autoSize = TextFieldAutoSize.CENTER;
@@ -110,7 +114,22 @@ package com.flyingdamage
 
             var progress:Number = age / _lifeTime;
 
-            if (_mode == "world" && !_worldFailed)
+            if (_mode == "vehicle" && !_failed)
+            {
+                var vpos:Object = _app.projectVehicle(_vehicleID, _rise * progress);
+                if (vpos != null && vpos.ok)
+                {
+                    this.x = Number(vpos.x);
+                    this.y = Number(vpos.y);
+                }
+                else
+                {
+                    _failed = true;
+                    this.x = _startX;
+                    this.y = _startY - DEFAULT_RISE * progress;
+                }
+            }
+            else if (_mode == "world" && !_failed)
             {
                 var pos:Object = _app.projectWorld(_wx, _wy + _rise * progress, _wz);
                 if (pos != null && pos.ok)
@@ -120,7 +139,7 @@ package com.flyingdamage
                 }
                 else
                 {
-                    _worldFailed = true;
+                    _failed = true;
                     this.x = _startX;
                     this.y = _startY - DEFAULT_RISE * progress;
                 }
@@ -142,12 +161,6 @@ package com.flyingdamage
         public function dispose():void
         {
             _app = null;
-            if (_bg != null)
-            {
-                if (_bg.parent != null)
-                    _bg.parent.removeChild(_bg);
-                _bg = null;
-            }
             if (_tf != null)
             {
                 if (_tf.parent != null)
