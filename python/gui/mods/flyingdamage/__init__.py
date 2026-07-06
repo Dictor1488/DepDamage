@@ -1,137 +1,120 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# One-shot visible renderer: in this WoT build only the first framework-driven
-# as_populate reliably reaches AS3. Therefore the SWF is created when damage is
-# already queued, so that first as_populate immediately pulls and draws it.
+# Gameface renderer for FlyingDamage. No AS3/SWF bridge is used.
+# Python catches damage, projects the vehicle to screen pixels, then pushes a
+# JSON payload into a WULF/Gameface view. JS draws the number as a DOM element.
 
+import json
 import logging
 
 import BigWorld
 import GUI
-import SCALEFORM
 from PlayerEvents import g_playerEvents
 
 logger = logging.getLogger(__name__)
 
-try:
-    from gui import DEPTH_OF_VehicleMarker as _DEPTH
-except Exception:
-    try:
-        from gui import DEPTH_OF_Battle as _DEPTH
-    except Exception:
-        _DEPTH = 0.0
-
-from gui.Scaleform.daapi.view.external_components import (
-    ExternalFlashComponent, ExternalFlashSettings)
-from gui.Scaleform.framework.entities.BaseDAAPIModule import BaseDAAPIModule
+RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
 
 try:
-    from gui.Scaleform.flash_wrapper import InputKeyMode
-except Exception:
-    InputKeyMode = None
+    from frameworks.wulf import ViewModel
+    from gui.impl.pub import ViewImpl, ViewSettings, WindowImpl, WindowFlags, ViewFlags
+    _OPENWG_OK = True
+    _OPENWG_ERR = None
+except Exception as _e:
+    ViewModel = object
+    ViewImpl = object
+    ViewSettings = None
+    WindowImpl = object
+    WindowFlags = None
+    ViewFlags = None
+    _OPENWG_OK = False
+    _OPENWG_ERR = _e
 
 
-_SWF_NAME = 'FlyingDamageApp.swf'
-_LINKAGE = 'com.flyingdamage.FlyingDamageApp'
-_damageQueue = [[]]
-_flashSeq = [0]
+if _OPENWG_OK:
+    class FlyingDamageModel(ViewModel):
+        """One string payload, same pattern as CustomHPBarGF."""
+
+        def __init__(self, properties=1, commands=0):
+            super(FlyingDamageModel, self).__init__(properties=properties, commands=commands)
+
+        def _initialize(self):
+            super(FlyingDamageModel, self)._initialize()
+            self._addStringProperty('payload', '{}')
+
+        def getPayload(self):
+            return self._getString('payload')
+
+        def setPayload(self, value):
+            self._setString('payload', value)
 
 
-class _FlyingDamageMeta(BaseDAAPIModule):
+    class FlyingDamageView(ViewImpl):
 
-    def py_log(self, msg):
-        logger.info('[FlyingDamage] %s', msg)
+        def __init__(self):
+            settings = ViewSettings(RES_MAP_ITEM_ID)
+            try:
+                settings.flags = ViewFlags.VIEW
+            except Exception:
+                pass
+            settings.model = FlyingDamageModel()
+            super(FlyingDamageView, self).__init__(settings)
+            self._lastRaw = None
 
-    def py_getScreenPos(self, vehicleID):
-        try:
-            from .hooks import projectVehicleScreen
-            return projectVehicleScreen(int(vehicleID))
-        except Exception:
-            return None
+        @property
+        def viewModel(self):
+            return self.getViewModel()
 
-    def py_pullDamage(self):
-        try:
-            q = _damageQueue[0]
-            if not q:
-                return []
-            _damageQueue[0] = []
-            logger.info('[FlyingDamage] py_pullDamage returns %d item(s)', len(q))
-            return q
-        except Exception:
-            logger.error('[FlyingDamage] py_pullDamage failed', exc_info=True)
-            return []
-
-    def as_populate(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_populate()
+        def pushDamage(self, payload):
+            raw = json.dumps(payload, separators=(',', ':'))
+            if raw == self._lastRaw:
+                return
+            self._lastRaw = raw
+            model = self.viewModel
+            try:
+                with model.transaction() as tx:
+                    tx.setPayload(raw)
+            except Exception:
+                model.setPayload(raw)
 
 
-class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
+    class FlyingDamageWindow(WindowImpl):
 
-    def __init__(self, seq):
-        self._seq = seq
-        super(FlyingDamageFlash, self).__init__(
-            ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
-        self.createExternalComponent()
-        self._configureApp()
-        try:
-            self.flashObject.py_log = self.py_log
-            self.flashObject.py_getScreenPos = self.py_getScreenPos
-            self.flashObject.py_pullDamage = self.py_pullDamage
-        except Exception:
-            logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
-        try:
-            self.active(True)
-            logger.info('[FlyingDamage] oneShot flash #%s active(True) queue=%d', self._seq, len(_damageQueue[0]))
-        except Exception:
-            logger.error('[FlyingDamage] active failed', exc_info=True)
-        logger.info('[FlyingDamage] oneShot flash #%s created', self._seq)
-
-    def _configureApp(self):
-        try:
-            self.movie.backgroundAlpha = 0.0
-            self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
-            if InputKeyMode is not None:
-                self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-            self.component.position.z = 9999.0
-            self.component.focus = False
-            self.component.moveFocus = False
-        except Exception:
-            logger.error('[FlyingDamage] configureApp partial', exc_info=True)
-
-    def close(self):
-        try:
-            if self._isDAAPIInited():
-                self.flashObject.as_dispose()
-        except Exception:
-            pass
-        try:
-            super(FlyingDamageFlash, self).close()
-        except Exception:
-            logger.info('[FlyingDamage] oneShot flash close non-fatal')
+        def __init__(self):
+            super(FlyingDamageWindow, self).__init__(
+                wndFlags=WindowFlags.WINDOW,
+                content=FlyingDamageView()
+            )
+else:
+    FlyingDamageWindow = None
 
 
 class Controller(object):
 
     def __init__(self):
-        self._enabled = True
         self._battleMode = False
-        self._flashes = []
+        self._window = None
+        self._view = None
+        self._seq = 0
         self._pushLog = 0
+        self._loadTried = False
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin one-shot SWF renderer')
+        logger.info('[FlyingDamageGF] controller.init begin')
+        if not _OPENWG_OK:
+            logger.error('[FlyingDamageGF] OpenWG/Gameface imports failed: %s', _OPENWG_ERR)
+
         try:
             from .settings.config import g_config
             g_config.registerSettings()
         except Exception:
-            logger.error('[FlyingDamage] settings failed', exc_info=True)
+            logger.error('[FlyingDamageGF] settings failed', exc_info=True)
 
         try:
             from .hooks import installHooks
             installHooks()
         except Exception:
-            logger.error('[FlyingDamage] installHooks failed', exc_info=True)
+            logger.error('[FlyingDamageGF] installHooks failed', exc_info=True)
 
         try:
             from .suppress import installSuppression, setFeed
@@ -139,20 +122,20 @@ class Controller(object):
             setFeed(showDamageForVehicle)
             installSuppression()
         except Exception:
-            logger.error('[FlyingDamage] early suppression failed', exc_info=True)
+            logger.error('[FlyingDamageGF] suppression failed', exc_info=True)
 
         g_playerEvents.onAvatarReady += self._onAvatarReady
         g_playerEvents.onAvatarBecomeNonPlayer += self._onBattleLeave
-        logger.info('[FlyingDamage] controller.init done')
+        logger.info('[FlyingDamageGF] controller.init done')
 
     def fini(self):
-        logger.info('[FlyingDamage] controller.fini')
+        logger.info('[FlyingDamageGF] controller.fini')
         try:
             g_playerEvents.onAvatarReady -= self._onAvatarReady
             g_playerEvents.onAvatarBecomeNonPlayer -= self._onBattleLeave
         except Exception:
             pass
-        self._destroyAllFlashes()
+        self._destroyWindow()
         try:
             from .utils import restore_overrides
             restore_overrides()
@@ -161,18 +144,23 @@ class Controller(object):
 
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
-        logger.info('[FlyingDamage] avatar ready')
-        BigWorld.callback(3.0, self._installSuppressionSafe)
-
-    def onMarkerPluginStart(self):
-        # Do not create SWF here. Creating it before damage means the only
-        # reliable AS3 entry (first as_populate) is wasted with an empty queue.
-        logger.info('[FlyingDamage] marker plugin start -> waiting for damage')
+        logger.info('[FlyingDamageGF] avatar ready')
         try:
             from .hooks import setView
             setView(self)
         except Exception:
             pass
+        BigWorld.callback(1.0, self._loadWindow)
+        BigWorld.callback(3.0, self._installSuppressionSafe)
+
+    def onMarkerPluginStart(self):
+        logger.info('[FlyingDamageGF] marker plugin start')
+        try:
+            from .hooks import setView
+            setView(self)
+        except Exception:
+            pass
+        self._loadWindow()
 
     def _installSuppressionSafe(self):
         try:
@@ -181,35 +169,48 @@ class Controller(object):
             setFeed(showDamageForVehicle)
             installSuppression()
         except Exception:
-            logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
+            logger.error('[FlyingDamageGF] installSuppression failed', exc_info=True)
 
-    def _makeFlashForQueuedDamage(self):
-        _flashSeq[0] += 1
-        seq = _flashSeq[0]
+    def _loadWindow(self):
+        if self._window is not None:
+            return True
+        if not _OPENWG_OK or FlyingDamageWindow is None:
+            if not self._loadTried:
+                self._loadTried = True
+                logger.error('[FlyingDamageGF] cannot load window: OpenWG/Gameface unavailable: %s', _OPENWG_ERR)
+            return False
         try:
-            flash = FlyingDamageFlash(seq)
-            self._flashes.append(flash)
-            BigWorld.callback(2.0, lambda: self._closeFlash(flash, seq))
+            self._window = FlyingDamageWindow()
+            self._window.load()
+            self._view = getattr(self._window, 'content', None)
+            if self._view is None:
+                self._view = getattr(self._window, '_WindowImpl__content', None)
+            logger.info('[FlyingDamageGF] Gameface window loaded view=%s', self._view is not None)
+            return True
         except Exception:
-            logger.error('[FlyingDamage] oneShot flash create failed', exc_info=True)
+            logger.error('[FlyingDamageGF] Gameface window load failed', exc_info=True)
+            self._window = None
+            self._view = None
+            return False
 
-    def _closeFlash(self, flash, seq):
+    def _destroyWindow(self):
         try:
-            if flash in self._flashes:
-                self._flashes.remove(flash)
-            flash.close()
-            logger.info('[FlyingDamage] oneShot flash #%s closed', seq)
+            if self._window is not None:
+                self._window.destroy()
+        except Exception:
+            pass
+        self._window = None
+        self._view = None
+        try:
+            from .hooks import setView
+            setView(None)
         except Exception:
             pass
 
     def _onBattleLeave(self, *a, **kw):
-        logger.info('[FlyingDamage] battle leave')
+        logger.info('[FlyingDamageGF] battle leave')
         self._battleMode = False
-        self._destroyAllFlashes()
-        try:
-            del _damageQueue[0][:]
-        except Exception:
-            pass
+        self._destroyWindow()
         try:
             from .hooks import resetState
             resetState()
@@ -221,32 +222,57 @@ class Controller(object):
         except Exception:
             pass
 
-    def _destroyAllFlashes(self):
-        for flash in list(self._flashes):
-            try:
-                flash.close()
-            except Exception:
-                pass
-        self._flashes = []
-        try:
-            from .hooks import setView
-            setView(None)
-        except Exception:
-            pass
-
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
-        _damageQueue[0].append({
-            'vid': str(int(vehicleID)),
+        if damage <= 0:
+            return
+        if self._window is None or self._view is None:
+            self._loadWindow()
+        if self._view is None:
+            if self._pushLog < 20:
+                self._pushLog += 1
+                logger.info('[FlyingDamageGF] skip damage: view not ready vid=%s dmg=%s', vehicleID, damage)
+            return
+
+        try:
+            from .hooks import projectVehicleScreen
+            pos = projectVehicleScreen(int(vehicleID))
+        except Exception:
+            pos = None
+
+        if not pos or not pos.get('ok'):
+            if self._pushLog < 80:
+                self._pushLog += 1
+                logger.info('[FlyingDamageGF] skip damage: no screen pos vid=%s dmg=%s pos=%s', vehicleID, damage, pos)
+            return
+
+        try:
+            sw, sh = GUI.screenResolution()[:2]
+        except Exception:
+            sw, sh = 1920, 1080
+
+        self._seq += 1
+        ev = {
+            'id': self._seq,
+            'vid': int(vehicleID),
             'dmg': int(damage),
-            'color': int(colorRGB),
+            'x': float(pos.get('x', 0.0)),
+            'y': float(pos.get('y', 0.0)),
+            'sw': int(sw),
+            'sh': int(sh),
+            'color': int(colorRGB) & 0xFFFFFF,
             'size': int(fontSize),
             'alpha': float(alpha),
-        })
-        if self._pushLog < 120:
-            self._pushLog += 1
-            logger.info('[FlyingDamage] queued oneShot damage vid=%s dmg=%s queue=%d -> create SWF',
-                        int(vehicleID), int(damage), len(_damageQueue[0]))
-        self._makeFlashForQueuedDamage()
+            'life': 1.6
+        }
+        payload = {'seq': self._seq, 'events': [ev]}
+        try:
+            self._view.pushDamage(payload)
+            if self._pushLog < 120:
+                self._pushLog += 1
+                logger.info('[FlyingDamageGF] push damage id=%s vid=%s dmg=%s xy=(%.1f,%.1f) screen=%sx%s',
+                            self._seq, int(vehicleID), int(damage), ev['x'], ev['y'], sw, sh)
+        except Exception:
+            logger.error('[FlyingDamageGF] pushDamage failed', exc_info=True)
 
 
 g_controller = Controller()
