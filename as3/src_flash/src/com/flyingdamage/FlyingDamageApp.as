@@ -3,6 +3,8 @@ package com.flyingdamage
     import flash.display.Sprite;
     import flash.events.TimerEvent;
     import flash.utils.Timer;
+    import flash.display.StageAlign;
+    import flash.display.StageScaleMode;
 
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
@@ -21,6 +23,7 @@ package com.flyingdamage
         private var _layer:DamageLayer = null;
         private var _timer:Timer = null;
         private var _debugShown:int = 0;
+        private var _selfTestShown:Boolean = false;
 
         public function FlyingDamageApp()
         {
@@ -31,6 +34,17 @@ package com.flyingdamage
 
         public function as_populate():void
         {
+            try
+            {
+                if (stage != null)
+                {
+                    stage.scaleMode = StageScaleMode.NO_SCALE;
+                    stage.align = StageAlign.TOP_LEFT;
+                    log("stage size=" + stage.stageWidth + "x" + stage.stageHeight);
+                }
+            }
+            catch (e:Error) {}
+
             _ensureLayer();
             if (_timer == null)
             {
@@ -39,6 +53,14 @@ package com.flyingdamage
             }
             _timer.start();
             log("as_populate (timer started)");
+
+            if (!_selfTestShown)
+            {
+                _selfTestShown = true;
+                // Internal AS3 self-test. This does not depend on Python calling
+                // as_showDamageScreen. If 8888 is visible, SWF rendering works.
+                as_showDamageScreen(120, 120, 8888, 0x00FFFF, 36, 1.0, 80, 3.0);
+            }
         }
 
         public function as_showDamageScreen(x:Number, y:Number, damage:int,
@@ -51,7 +73,7 @@ package com.flyingdamage
             {
                 _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 12)
+                if (_debugShown <= 16)
                     log("as_showDamageScreen d=" + damage + " x=" + x + " y=" + y);
             }
             catch (e:Error)
@@ -72,7 +94,7 @@ package com.flyingdamage
                 _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
                                        colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 12)
+                if (_debugShown <= 16)
                     log("as_showDamageWorld d=" + damage + " x=" + fallbackX + " y=" + fallbackY);
             }
             catch (e:Error)
