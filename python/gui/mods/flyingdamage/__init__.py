@@ -1,31 +1,11 @@
 # -*- coding: utf-8 -*-
-# flyingdamage/__init__.py  --  Python 2.7
-# Custom SWF renderer for FlyingDamage.
-#
-# Damage numbers are rendered by FlyingDamageApp.swf. The important difference
-# from the old screen-fixed build: world_anchor damage is queued with vehicleID,
-# and AS3 asks Python for the current vehicle projection on every tick. This
-# keeps the flying number attached to the damaged tank while camera/tank moves.
-
 import logging
 
 import BigWorld
 import GUI
 import SCALEFORM
 from PlayerEvents import g_playerEvents
-
-logger = logging.getLogger(__name__)
-
-try:
-    from gui import DEPTH_OF_VehicleMarker as _DEPTH
-except Exception:
-    try:
-        from gui import DEPTH_OF_Battle as _DEPTH
-    except Exception:
-        _DEPTH = 0.0
-
-from gui.Scaleform.daapi.view.external_components import (
-    ExternalFlashComponent, ExternalFlashSettings)
+from gui.Scaleform.daapi.view.external_components import ExternalFlashComponent, ExternalFlashSettings
 from gui.Scaleform.framework.entities.BaseDAAPIModule import BaseDAAPIModule
 
 try:
@@ -33,15 +13,16 @@ try:
 except Exception:
     InputKeyMode = None
 
+logger = logging.getLogger(__name__)
 
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'FlyingDamageApp'
+_HIGH_DEPTH = 9999.0
+_MAX_QUEUE = 128
+_damageQueue = []
 _pushLog = [0]
 _pullLog = [0]
-_testLog = [False]
-_damageQueue = []
-_MAX_QUEUE = 128
-_HIGH_DEPTH = 9999.0
+_directLog = [0]
 
 
 def _fmt_float(v):
@@ -54,13 +35,12 @@ def _fmt_float(v):
 def _screen_size():
     try:
         sw, sh = GUI.screenResolution()[:2]
-        sw = float(sw)
-        sh = float(sh)
-        if sw <= 0.0 or sh <= 0.0:
-            return 1920.0, 1080.0
-        return sw, sh
+        sw, sh = float(sw), float(sh)
+        if sw > 0.0 and sh > 0.0:
+            return sw, sh
     except Exception:
-        return 1920.0, 1080.0
+        pass
+    return 1920.0, 1080.0
 
 
 def _norm_xy(x, y):
@@ -70,9 +50,7 @@ def _norm_xy(x, y):
         ny = float(y) / sh
     except Exception:
         nx, ny = 0.5, 0.5
-    nx = max(-0.50, min(1.50, nx))
-    ny = max(-0.50, min(1.50, ny))
-    return nx, ny, sw, sh
+    return max(-0.5, min(1.5, nx)), max(-0.5, min(1.5, ny)), sw, sh
 
 
 def _queue_record(record):
@@ -133,16 +111,11 @@ class _FlyingDamageMeta(BaseDAAPIModule):
         if self._isDAAPIInited():
             self.flashObject.as_populate()
 
-    def as_clear(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_clear()
-
 
 class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
 
     def __init__(self):
-        super(FlyingDamageFlash, self).__init__(
-            ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
+        super(FlyingDamageFlash, self).__init__(ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
         self.createExternalComponent()
         self._configureApp()
         try:
@@ -155,15 +128,6 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         self.as_populate()
         logger.info('[FlyingDamage] flash component created')
 
-    def forceTopDepth(self):
-        try:
-            self.component.position.z = _HIGH_DEPTH
-            self.component.focus = False
-            self.component.moveFocus = False
-            logger.info('[FlyingDamage] flash depth forced to %.1f', self.component.position.z)
-        except Exception:
-            logger.error('[FlyingDamage] force depth failed', exc_info=True)
-
     def _configureApp(self):
         try:
             self.movie.backgroundAlpha = 0.0
@@ -174,43 +138,59 @@ class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
         except Exception:
             logger.error('[FlyingDamage] configureApp partial', exc_info=True)
 
+    def forceTopDepth(self):
+        try:
+            self.component.position.z = _HIGH_DEPTH
+            self.component.focus = False
+            self.component.moveFocus = False
+            logger.info('[FlyingDamage] flash depth forced to %.1f', self.component.position.z)
+        except Exception:
+            logger.error('[FlyingDamage] force depth failed', exc_info=True)
+
+    def showVehicleDamageDirect(self, vehicleID, nx, ny, damage, colorRGB, fontSize, alpha, riseMeters, lifeTime):
+        try:
+            if not self._isDAAPIInited():
+                return False
+            self.flashObject.as_showDamageVehicle(int(vehicleID), float(nx), float(ny), int(damage), int(colorRGB), int(fontSize), float(alpha), float(riseMeters), float(lifeTime))
+            if _directLog[0] < 60:
+                _directLog[0] += 1
+                logger.info('[FlyingDamage] DIRECT_SWF vehicle d=%s vid=%s norm=(%.4f,%.4f)', int(damage), int(vehicleID), float(nx), float(ny))
+            return True
+        except Exception:
+            logger.error('[FlyingDamage] DIRECT_SWF vehicle failed vid=%s d=%s', vehicleID, damage, exc_info=True)
+            return False
+
     def close(self):
         try:
-            self.as_dispose()
+            if self._isDAAPIInited():
+                self.flashObject.as_dispose()
         except Exception:
             pass
         try:
             super(FlyingDamageFlash, self).close()
         except Exception:
-            logger.info('[FlyingDamage] flash close (non-fatal)')
-
-    def as_dispose(self):
-        if self._isDAAPIInited():
-            self.flashObject.as_dispose()
+            logger.info('[FlyingDamage] flash close non-fatal')
 
 
 class Controller(object):
 
     def __init__(self):
-        self._enabled = True
         self._battleMode = False
         self._flash = None
         self._depthTicks = 0
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (custom SWF vehicle anchor)')
+        logger.info('[FlyingDamage] controller.init begin direct custom SWF vehicle anchor')
         try:
             from .settings.config import g_config
             g_config.registerSettings()
         except Exception:
             logger.error('[FlyingDamage] settings failed', exc_info=True)
-
         try:
             from .hooks import installHooks
             installHooks()
         except Exception:
             logger.error('[FlyingDamage] installHooks failed', exc_info=True)
-
         try:
             from .suppress import installSuppression, setFeed
             from .hooks import showDamageForVehicle
@@ -218,7 +198,6 @@ class Controller(object):
             installSuppression()
         except Exception:
             logger.error('[FlyingDamage] early suppression failed', exc_info=True)
-
         g_playerEvents.onAvatarReady += self._onAvatarReady
         g_playerEvents.onAvatarBecomeNonPlayer += self._onBattleLeave
         logger.info('[FlyingDamage] controller.init done')
@@ -239,18 +218,28 @@ class Controller(object):
 
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
-        _testLog[0] = False
         self._depthTicks = 0
-        logger.info('[FlyingDamage] avatar ready -> delayed custom SWF create')
+        logger.info('[FlyingDamage] avatar ready -> delayed direct custom SWF create')
         BigWorld.callback(2.0, self._createFlashDelayed)
         BigWorld.callback(3.5, self._installSuppressionSafe)
 
     def _createFlashDelayed(self):
         if not self._battleMode:
             return
-        logger.info('[FlyingDamage] delayed create custom SWF now')
+        logger.info('[FlyingDamage] delayed create direct custom SWF now')
         self._createFlash()
         self._keepDepthOnTop()
+
+    def _createFlash(self):
+        if self._flash is not None:
+            return
+        try:
+            self._flash = FlyingDamageFlash()
+            from .hooks import setView
+            setView(self)
+        except Exception:
+            logger.error('[FlyingDamage] createFlash failed', exc_info=True)
+            self._flash = None
 
     def _keepDepthOnTop(self):
         if not self._battleMode or self._flash is None:
@@ -271,17 +260,6 @@ class Controller(object):
             installSuppression()
         except Exception:
             logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
-
-    def _createFlash(self):
-        if self._flash is not None:
-            return
-        try:
-            self._flash = FlyingDamageFlash()
-            from .hooks import setView
-            setView(self)
-        except Exception:
-            logger.error('[FlyingDamage] createFlash failed', exc_info=True)
-            self._flash = None
 
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FlyingDamage] battle leave')
@@ -315,56 +293,34 @@ class Controller(object):
         except Exception:
             pass
 
-    def showDamageNormalized(self, nx, ny, damage, colorRGB, fontSize, alpha,
-                             riseNormalized=0.055, lifeTime=1.6):
-        try:
-            rec = 'N|%s|%s|%d|%d|%d|%s|%s|%s' % (
-                _fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize),
-                _fmt_float(alpha), _fmt_float(riseNormalized), _fmt_float(lifeTime))
-            _queue_record(rec)
-            if _pushLog[0] < 30:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] queued normalized d=%s nx=%.4f ny=%.4f',
-                            int(damage), float(nx), float(ny))
-        except Exception:
-            logger.error('[FlyingDamage] queue normalized failed', exc_info=True)
-
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
         try:
             nx, ny, sw, sh = _norm_xy(x, y)
             riseNorm = max(0.01, min(0.20, float(risePixels) / sh))
-            self.showDamageNormalized(nx, ny, damage, colorRGB, fontSize, alpha, riseNorm, lifeTime)
-            logger.info('[FlyingDamage] screen->normalized d=%s screen=(%.1f,%.1f) res=(%.0f,%.0f) norm=(%.4f,%.4f)',
-                        int(damage), float(x), float(y), sw, sh, nx, ny)
+            rec = 'N|%s|%s|%d|%d|%d|%s|%s|%s' % (_fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha), _fmt_float(riseNorm), _fmt_float(lifeTime))
+            _queue_record(rec)
+            logger.info('[FlyingDamage] queued screen d=%s norm=(%.4f,%.4f)', int(damage), nx, ny)
         except Exception:
             logger.error('[FlyingDamage] queue screen failed', exc_info=True)
 
-    def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
-                        fontSize, alpha, riseMeters=1.35, lifeTime=1.6, vehicleID=None):
+    def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB, fontSize, alpha, riseMeters=1.35, lifeTime=1.6, vehicleID=None):
         try:
             nx, ny, sw, sh = _norm_xy(fallbackX, fallbackY)
             if vehicleID is not None:
-                rec = 'V|%d|%s|%s|%d|%d|%d|%s|%s|%s' % (
-                    int(vehicleID), _fmt_float(nx), _fmt_float(ny),
-                    int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
-                    _fmt_float(riseMeters), _fmt_float(lifeTime))
-                _queue_record(rec)
-                if _pushLog[0] < 40:
+                directOK = False
+                if self._flash is not None:
+                    directOK = self._flash.showVehicleDamageDirect(vehicleID, nx, ny, damage, colorRGB, fontSize, alpha, riseMeters, lifeTime)
+                if not directOK:
+                    rec = 'V|%d|%s|%s|%d|%d|%d|%s|%s|%s' % (int(vehicleID), _fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha), _fmt_float(riseMeters), _fmt_float(lifeTime))
+                    _queue_record(rec)
+                if _pushLog[0] < 80:
                     _pushLog[0] += 1
-                    logger.info('[FlyingDamage] queued vehicle anchored d=%s vid=%s norm=(%.4f,%.4f) rise=%.2f',
-                                int(damage), int(vehicleID), nx, ny, float(riseMeters))
+                    logger.info('[FlyingDamage] vehicle anchored d=%s vid=%s norm=(%.4f,%.4f) directOK=%s', int(damage), int(vehicleID), nx, ny, directOK)
             else:
-                rec = 'W|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s' % (
-                    _fmt_float(wx), _fmt_float(wy), _fmt_float(wz),
-                    _fmt_float(nx), _fmt_float(ny),
-                    int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
-                    _fmt_float(riseMeters), _fmt_float(lifeTime))
+                rec = 'W|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s' % (_fmt_float(wx), _fmt_float(wy), _fmt_float(wz), _fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha), _fmt_float(riseMeters), _fmt_float(lifeTime))
                 _queue_record(rec)
-                if _pushLog[0] < 40:
-                    _pushLog[0] += 1
-                    logger.info('[FlyingDamage] queued world anchored d=%s norm=(%.4f,%.4f)', int(damage), nx, ny)
         except Exception:
-            logger.error('[FlyingDamage] queue world/vehicle failed', exc_info=True)
+            logger.error('[FlyingDamage] direct/queue vehicle failed', exc_info=True)
 
     def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
         self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
