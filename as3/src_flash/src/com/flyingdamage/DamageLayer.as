@@ -6,6 +6,7 @@ package com.flyingdamage
     {
         private var _app:FlyingDamageApp;
         private var _items:Vector.<FloatingNumber>;
+        private var _logCount:int = 0;
 
         public function DamageLayer(app:FlyingDamageApp)
         {
@@ -27,6 +28,7 @@ package com.flyingdamage
                                                                 alpha, rise, life);
             addChild(fn);
             _items.push(fn);
+            log("DamageLayer add screen d=" + damage + " items=" + _items.length + " children=" + numChildren + " pos=(" + x + "," + y + ")");
         }
 
         public function showWorldDamage(wx:Number, wy:Number, wz:Number,
@@ -44,6 +46,7 @@ package com.flyingdamage
                                                                rise, life);
             addChild(fn);
             _items.push(fn);
+            log("DamageLayer add world d=" + damage + " items=" + _items.length + " children=" + numChildren + " fallback=(" + fallbackX + "," + fallbackY + ")");
         }
 
         public function showVehicleDamage(vehicleID:int,
@@ -61,6 +64,7 @@ package com.flyingdamage
                                                                  riseMeters, life);
             addChild(fn);
             _items.push(fn);
+            log("DamageLayer add vehicle vid=" + vehicleID + " d=" + damage + " items=" + _items.length + " children=" + numChildren + " fallback=(" + fallbackX + "," + fallbackY + ") rise=" + riseMeters);
         }
 
         public function clearAll():void
@@ -89,7 +93,18 @@ package com.flyingdamage
                 }
             }
             _items = survivors;
+            if (_logCount < 20 && _items.length > 0)
+            {
+                _logCount++;
+                log("DamageLayer tick items=" + _items.length + " children=" + numChildren + " visible=" + visible + " alpha=" + alpha);
+            }
             return _items.length;
+        }
+
+        private function log(msg:String):void
+        {
+            try { if (_app != null) _app.debugLog(msg); }
+            catch (e:Error) {}
         }
     }
 }
