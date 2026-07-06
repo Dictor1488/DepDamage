@@ -9,12 +9,16 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * Uses primitive AS calls from Python. Passing Python dict/Object through
-     * Scaleform was not reliable on the current client, so damage is pushed as
-     * separate Number/int arguments.
+     * Important Scaleform quirk: GUI.Flash is centered by its SWF dimensions.
+     * Changing Python-side position/size/anchors is unreliable, so the root
+     * sprite must shift itself to make AS3 coordinates match screen pixels.
      */
     public class FlyingDamageApp extends Sprite
     {
+        // Must match workflow mxmlc -default-size=3840,2160.
+        private static const SWF_HALF_WIDTH:Number = 1920.0;
+        private static const SWF_HALF_HEIGHT:Number = 1080.0;
+
         public var py_getScreenPos:Function = null;
         public var py_projectWorld:Function = null;
         public var py_pullDamage:Function = null;
@@ -24,6 +28,7 @@ package com.flyingdamage
         private var _timer:Timer = null;
         private var _debugShown:int = 0;
         private var _selfTestShown:Boolean = false;
+        private var _positionLogged:Boolean = false;
 
         public function FlyingDamageApp()
         {
@@ -46,6 +51,8 @@ package com.flyingdamage
             catch (e:Error) {}
 
             _ensureLayer();
+            _updateAppPosition();
+
             if (_timer == null)
             {
                 _timer = new Timer(16);
@@ -57,9 +64,9 @@ package com.flyingdamage
             if (!_selfTestShown)
             {
                 _selfTestShown = true;
-                // Internal AS3 self-test. This does not depend on Python calling
-                // as_showDamageScreen. If 8888 is visible, SWF rendering works.
-                as_showDamageScreen(120, 120, 8888, 0x00FFFF, 36, 1.0, 80, 3.0);
+                // Internal AS3 self-test. After root-position correction this
+                // should appear near the top-left of the actual screen.
+                as_showDamageScreen(120, 120, 8888, 0x00FFFF, 42, 1.0, 80, 4.0);
             }
         }
 
@@ -69,12 +76,13 @@ package com.flyingdamage
                                             life:Number):void
         {
             _ensureLayer();
+            _updateAppPosition();
             try
             {
                 _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
                 if (_debugShown <= 16)
-                    log("as_showDamageScreen d=" + damage + " x=" + x + " y=" + y);
+                    log("as_showDamageScreen d=" + damage + " x=" + x + " y=" + y + " root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
@@ -89,13 +97,14 @@ package com.flyingdamage
                                            rise:Number, life:Number):void
         {
             _ensureLayer();
+            _updateAppPosition();
             try
             {
                 _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
                                        colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
                 if (_debugShown <= 16)
-                    log("as_showDamageWorld d=" + damage + " x=" + fallbackX + " y=" + fallbackY);
+                    log("as_showDamageWorld d=" + damage + " x=" + fallbackX + " y=" + fallbackY + " root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
@@ -147,10 +156,28 @@ package com.flyingdamage
             }
         }
 
+        private function _updateAppPosition():void
+        {
+            if (stage == null)
+                return;
+
+            var sw:Number = stage.stageWidth;
+            var sh:Number = stage.stageHeight;
+            this.x = SWF_HALF_WIDTH - (sw / 2.0);
+            this.y = SWF_HALF_HEIGHT - (sh / 2.0);
+
+            if (!_positionLogged)
+            {
+                _positionLogged = true;
+                log("root corrected to x=" + this.x + " y=" + this.y + " for screen=" + sw + "x" + sh);
+            }
+        }
+
         private function onTick(e:TimerEvent):void
         {
             if (_layer == null)
                 return;
+            _updateAppPosition();
             _layer.tick();
         }
 
