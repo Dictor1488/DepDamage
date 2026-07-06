@@ -3,8 +3,9 @@
 # Existing vehicle marker renderer for FlyingDamage.
 #
 # This build modifies the already-visible marker of the damaged vehicle for a
-# short time. It calls marker methods through VehicleMarkerPlugin wrappers,
-# because MarkersManager itself does not expose every helper method.
+# short time. It uses the current VehicleMarkerPlugin to find the markerID and
+# then drives the real marker canvas directly when public/wrapper methods are not
+# exposed by the current WoT build.
 
 import logging
 
@@ -20,6 +21,7 @@ _markerParent = [None]
 _markerPlugin = [None]
 _markerHookInstalled = [False]
 _restoreCallbacks = {}
+_canvasLog = [False]
 
 
 def _installMarkerLayerHook():
@@ -41,6 +43,7 @@ def _installMarkerLayerHook():
             _markerPlugin[0] = self
             logger.info('[FlyingDamage] marker layer captured: %s markers=%s',
                         _markerParent[0], len(getattr(self, '_markers', {})))
+            _logCanvasShape()
         except Exception:
             logger.error('[FlyingDamage] marker layer capture failed', exc_info=True)
         return result
@@ -51,6 +54,7 @@ def _installMarkerLayerHook():
                 _cancelRestores()
                 _markerParent[0] = None
                 _markerPlugin[0] = None
+                _canvasLog[0] = False
                 logger.info('[FlyingDamage] marker layer released')
         except Exception:
             logger.error('[FlyingDamage] marker layer release failed', exc_info=True)
@@ -98,40 +102,93 @@ def _getAnyExistingMarkerID():
     return None
 
 
-def _setTextLabelEnabled(markerID, enabled):
-    plugin = _markerPlugin[0]
-    if plugin is None:
-        return False
+def _getCanvas():
+    parent = _markerParent[0]
+    if parent is None:
+        return None
+    # WoT builds differ: some expose helpers on MarkersManager, some only keep
+    # the actual C++/GUI canvas in a private __canvas field.
+    for name in ('_MarkersManager__canvas', '_VehicleMarkersManager__canvas', '__canvas'):
+        try:
+            canvas = getattr(parent, name, None)
+            if canvas is not None:
+                return canvas
+        except Exception:
+            pass
+    return None
+
+
+def _logCanvasShape():
+    if _canvasLog[0]:
+        return
+    _canvasLog[0] = True
+    parent = _markerParent[0]
+    canvas = _getCanvas()
     try:
-        plugin._setMarkerTextLabelEnabled(markerID, enabled)
-        return True
+        logger.info('[FlyingDamage] marker parent shape: hasPublicText=%s hasPublicDistance=%s canvas=%s hasCanvasText=%s hasCanvasDistance=%s hasCanvasInvoke=%s',
+                    hasattr(parent, 'setMarkerTextLabelEnabled'),
+                    hasattr(parent, 'setMarkerCustomDistanceStr'),
+                    canvas,
+                    hasattr(canvas, 'markerSetTextLabelEnabled') if canvas is not None else False,
+                    hasattr(canvas, 'markerSetCustomDistanceStr') if canvas is not None else False,
+                    hasattr(canvas, 'markerInvoke') if canvas is not None else False)
     except Exception:
-        logger.info('[FlyingDamage] _setMarkerTextLabelEnabled failed markerID=%s enabled=%s', markerID, enabled, exc_info=True)
-        return False
+        pass
+
+
+def _setTextLabelEnabled(markerID, enabled):
+    parent = _markerParent[0]
+    try:
+        if parent is not None and hasattr(parent, 'setMarkerTextLabelEnabled'):
+            parent.setMarkerTextLabelEnabled(markerID, enabled)
+            return True
+    except Exception:
+        pass
+    canvas = _getCanvas()
+    try:
+        if canvas is not None and hasattr(canvas, 'markerSetTextLabelEnabled'):
+            canvas.markerSetTextLabelEnabled(markerID, enabled)
+            return True
+    except Exception:
+        logger.info('[FlyingDamage] canvas.markerSetTextLabelEnabled failed markerID=%s enabled=%s', markerID, enabled, exc_info=True)
+    return False
 
 
 def _setCustomDistanceText(markerID, text):
-    plugin = _markerPlugin[0]
-    if plugin is None:
-        return False
+    parent = _markerParent[0]
     try:
-        plugin._setMarkerCustomDistanceStr(markerID, text)
-        return True
+        if parent is not None and hasattr(parent, 'setMarkerCustomDistanceStr'):
+            parent.setMarkerCustomDistanceStr(markerID, text)
+            return True
     except Exception:
-        logger.info('[FlyingDamage] _setMarkerCustomDistanceStr failed markerID=%s text=%s', markerID, text, exc_info=True)
-        return False
+        pass
+    canvas = _getCanvas()
+    try:
+        if canvas is not None and hasattr(canvas, 'markerSetCustomDistanceStr'):
+            canvas.markerSetCustomDistanceStr(markerID, text)
+            return True
+    except Exception:
+        logger.info('[FlyingDamage] canvas.markerSetCustomDistanceStr failed markerID=%s text=%s', markerID, text, exc_info=True)
+    return False
 
 
 def _invokeMarker(markerID, function, *args):
-    plugin = _markerPlugin[0]
-    if plugin is None:
-        return False
+    parent = _markerParent[0]
     try:
-        plugin._invokeMarker(markerID, function, *args)
-        return True
+        if parent is not None and hasattr(parent, 'invokeMarker'):
+            parent.invokeMarker(markerID, function, *args)
+            return True
     except Exception:
-        logger.info('[FlyingDamage] _invokeMarker failed markerID=%s fn=%s', markerID, function, exc_info=True)
-        return False
+        pass
+    canvas = _getCanvas()
+    try:
+        if canvas is not None and hasattr(canvas, 'markerInvoke'):
+            signature = (function,) + args
+            canvas.markerInvoke(markerID, signature)
+            return True
+    except Exception:
+        logger.info('[FlyingDamage] canvas.markerInvoke failed markerID=%s fn=%s', markerID, function, exc_info=True)
+    return False
 
 
 class _ExistingMarkerRenderer(object):
@@ -164,12 +221,12 @@ class _ExistingMarkerRenderer(object):
         try:
             labelOK = _setTextLabelEnabled(markerID, True)
             textOK = _setCustomDistanceText(markerID, txt)
-            _invokeMarker(markerID, 'update')
+            invokeOK = _invokeMarker(markerID, 'update')
 
-            if _pushLog[0] < 80:
+            if _pushLog[0] < 100:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] EXISTING_MARKER show d=%s vid=%s markerID=%s text=%s labelOK=%s textOK=%s',
-                            int(damage), vehicleID, markerID, txt, labelOK, textOK)
+                logger.info('[FlyingDamage] EXISTING_MARKER show d=%s vid=%s markerID=%s text=%s labelOK=%s textOK=%s invokeOK=%s',
+                            int(damage), vehicleID, markerID, txt, labelOK, textOK, invokeOK)
 
             self._scheduleRestore(markerID, max(0.5, float(lifeTime)))
             return True
@@ -189,9 +246,9 @@ class _ExistingMarkerRenderer(object):
         try:
             labelOK = _setTextLabelEnabled(markerID, True)
             textOK = _setCustomDistanceText(markerID, '9999')
-            _invokeMarker(markerID, 'update')
-            logger.info('[FlyingDamage] EXISTING_MARKER debug markerID=%s text=9999 labelOK=%s textOK=%s',
-                        markerID, labelOK, textOK)
+            invokeOK = _invokeMarker(markerID, 'update')
+            logger.info('[FlyingDamage] EXISTING_MARKER debug markerID=%s text=9999 labelOK=%s textOK=%s invokeOK=%s',
+                        markerID, labelOK, textOK, invokeOK)
             self._scheduleRestore(markerID, 5.0)
             return True
         except Exception:
@@ -215,10 +272,11 @@ class _ExistingMarkerRenderer(object):
         if _markerPlugin[0] is None:
             return
         try:
-            _setCustomDistanceText(markerID, '')
-            _setTextLabelEnabled(markerID, False)
-            _invokeMarker(markerID, 'update')
-            logger.info('[FlyingDamage] EXISTING_MARKER restore markerID=%s', markerID)
+            textOK = _setCustomDistanceText(markerID, '')
+            labelOK = _setTextLabelEnabled(markerID, False)
+            invokeOK = _invokeMarker(markerID, 'update')
+            logger.info('[FlyingDamage] EXISTING_MARKER restore markerID=%s labelOK=%s textOK=%s invokeOK=%s',
+                        markerID, labelOK, textOK, invokeOK)
         except Exception:
             logger.error('[FlyingDamage] existing marker restore failed markerID=%s', markerID, exc_info=True)
 
@@ -231,7 +289,7 @@ class Controller(object):
         self._renderer = _ExistingMarkerRenderer()
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers via plugin)')
+        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers canvas)')
         _installMarkerLayerHook()
         try:
             from .settings.config import g_config
