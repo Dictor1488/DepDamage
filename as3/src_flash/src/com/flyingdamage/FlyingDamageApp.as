@@ -6,13 +6,6 @@ package com.flyingdamage
     import flash.display.StageAlign;
     import flash.display.StageScaleMode;
 
-    /**
-     * FlyingDamageApp -- ExternalFlashComponent.
-     *
-     * Python queues damage events. AS3 renders visible flying numbers and, for
-     * vehicle anchored events, asks Python for the current screen projection of
-     * the damaged vehicle every tick.
-     */
     public class FlyingDamageApp extends Sprite
     {
         public var py_getScreenPos:Function = null;
@@ -25,6 +18,7 @@ package com.flyingdamage
         private var _debugShown:int = 0;
         private var _positionLogged:Boolean = false;
         private var _pullLogged:int = 0;
+        private var _projectLog:int = 0;
         private var _emptyPollLogged:Boolean = false;
 
         public function FlyingDamageApp()
@@ -32,8 +26,11 @@ package com.flyingdamage
             super();
             x = 0;
             y = 0;
+            visible = true;
+            alpha = 1.0;
             mouseEnabled = false;
             mouseChildren = false;
+            log("constructor visible=" + visible + " alpha=" + alpha);
         }
 
         public function as_populate():void
@@ -46,8 +43,12 @@ package com.flyingdamage
                     stage.align = StageAlign.TOP_LEFT;
                     log("stage size=" + stage.stageWidth + "x" + stage.stageHeight);
                 }
+                else
+                {
+                    log("stage is null in as_populate");
+                }
             }
-            catch (e:Error) {}
+            catch (e:Error) { log("stage setup error: " + e.message); }
 
             _ensureLayer();
             _updateAppPosition();
@@ -58,7 +59,7 @@ package com.flyingdamage
                 _timer.addEventListener(TimerEvent.TIMER, onTick);
             }
             _timer.start();
-            log("as_populate (timer started, vehicle-anchored coordinates)");
+            log("as_populate diagnostics started rootChildren=" + numChildren + " layer=" + _layer);
         }
 
         public function as_showDamageScreen(x:Number, y:Number, damage:int,
@@ -94,8 +95,8 @@ package com.flyingdamage
             {
                 _layer.showScreenDamage(px, py, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 40)
-                    log("showDamage " + mode + " d=" + damage + " px=(" + px + "," + py + ") stage=(" + _stageW() + "," + _stageH() + ") root=(" + this.x + "," + this.y + ")");
+                if (_debugShown <= 80)
+                    log("showDamage " + mode + " d=" + damage + " px=(" + px + "," + py + ") stage=(" + _stageW() + "," + _stageH() + ") rootChildren=" + numChildren);
             }
             catch (e:Error)
             {
@@ -116,8 +117,8 @@ package com.flyingdamage
                 _layer.showWorldDamage(wx, wy, wz, _stageW() * fallbackNX, _stageH() * fallbackNY,
                                        damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
-                if (_debugShown <= 40)
-                    log("as_showDamageWorld d=" + damage + " norm=(" + fallbackNX + "," + fallbackNY + ") stage=(" + _stageW() + "," + _stageH() + ")");
+                if (_debugShown <= 80)
+                    log("as_showDamageWorld d=" + damage + " norm=(" + fallbackNX + "," + fallbackNY + ")");
             }
             catch (e:Error)
             {
@@ -133,17 +134,22 @@ package com.flyingdamage
         {
             _ensureLayer();
             _updateAppPosition();
+            var fx:Number = _stageW() * fallbackNX;
+            var fy:Number = _stageH() * fallbackNY;
+            log("ENTER as_showDamageVehicle vid=" + vehicleID + " d=" + damage + " fallbackPx=(" + fx + "," + fy + ") norm=(" + fallbackNX + "," + fallbackNY + ") layerChildren=" + _layer.numChildren);
             try
             {
-                _layer.showVehicleDamage(vehicleID, _stageW() * fallbackNX, _stageH() * fallbackNY,
-                                         damage, colorRGB, fontSize, alpha, riseMeters, life);
+                _layer.showVehicleDamage(vehicleID, fx, fy, damage, colorRGB, fontSize, alpha, riseMeters, life);
                 _debugShown++;
-                if (_debugShown <= 40)
-                    log("as_showDamageVehicle vid=" + vehicleID + " d=" + damage + " norm=(" + fallbackNX + "," + fallbackNY + ") stage=(" + _stageW() + "," + _stageH() + ")");
+                if (_debugShown <= 120)
+                    log("EXIT as_showDamageVehicle vid=" + vehicleID + " d=" + damage + " rootChildren=" + numChildren + " layerChildren=" + _layer.numChildren);
             }
             catch (e:Error)
             {
                 log("as_showDamageVehicle error: " + e.message);
+                // emergency fallback: still try screen-fixed drawing
+                try { _layer.showScreenDamage(fx, fy, damage, colorRGB, fontSize, alpha, 70, life); }
+                catch (e2:Error) { log("as_showDamageVehicle emergency fallback error: " + e2.message); }
             }
         }
 
@@ -176,7 +182,10 @@ package com.flyingdamage
         public function projectVehicle(vehicleID:int, riseMeters:Number):Object
         {
             if (py_getScreenPos == null)
+            {
+                if (_projectLog < 20) { _projectLog++; log("projectVehicle py_getScreenPos null vid=" + vehicleID); }
                 return null;
+            }
             try
             {
                 var pos:Object = py_getScreenPos(vehicleID, riseMeters);
@@ -185,9 +194,17 @@ package com.flyingdamage
                     pos.x = _stageW() * Number(pos.x);
                     pos.y = _stageH() * Number(pos.y);
                 }
+                if (_projectLog < 40)
+                {
+                    _projectLog++;
+                    log("projectVehicle result vid=" + vehicleID + " rise=" + riseMeters + " ok=" + (pos != null && pos.ok) + " pos=" + (pos == null ? "null" : (pos.x + "," + pos.y)));
+                }
                 return pos;
             }
-            catch (e:Error) {}
+            catch (e:Error)
+            {
+                log("projectVehicle error: " + e.message);
+            }
             return null;
         }
 
@@ -205,7 +222,7 @@ package com.flyingdamage
                 }
                 return pos;
             }
-            catch (e:Error) {}
+            catch (e:Error) { log("projectWorld error: " + e.message); }
             return null;
         }
 
@@ -215,6 +232,7 @@ package com.flyingdamage
             {
                 _layer = new DamageLayer(this);
                 addChild(_layer);
+                log("DamageLayer created rootChildren=" + numChildren);
             }
         }
 
@@ -222,10 +240,12 @@ package com.flyingdamage
         {
             this.x = 0;
             this.y = 0;
+            this.visible = true;
+            this.alpha = 1.0;
             if (!_positionLogged)
             {
                 _positionLogged = true;
-                log("root 0,0; vehicle anchored render; stage=" + _stageW() + "x" + _stageH());
+                log("root 0,0 diagnostics; stage=" + _stageW() + "x" + _stageH() + " visible=" + visible + " alpha=" + alpha);
             }
         }
 
@@ -321,6 +341,11 @@ package com.flyingdamage
             {
                 log("parse damage row error: " + e.message + " row=" + row);
             }
+        }
+
+        public function debugLog(msg:String):void
+        {
+            log(msg);
         }
 
         private function log(msg:String):void
