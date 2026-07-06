@@ -46,6 +46,23 @@ package com.flyingdamage
             _items.push(fn);
         }
 
+        public function showVehicleDamage(vehicleID:int,
+                                          fallbackX:Number, fallbackY:Number,
+                                          damage:int, colorRGB:uint,
+                                          fontSize:int, alpha:Number,
+                                          riseMeters:Number, life:Number):void
+        {
+            if (damage <= 0)
+                return;
+            var fn:FloatingNumber = FloatingNumber.createVehicle(_app, vehicleID,
+                                                                 fallbackX, fallbackY,
+                                                                 damage, colorRGB,
+                                                                 fontSize, alpha,
+                                                                 riseMeters, life);
+            addChild(fn);
+            _items.push(fn);
+        }
+
         public function clearAll():void
         {
             for each (var fn:FloatingNumber in _items)
