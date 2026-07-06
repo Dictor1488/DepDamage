@@ -8,13 +8,6 @@ package com.flyingdamage
     import flash.filters.GlowFilter;
     import flash.utils.getTimer;
 
-    /**
-     * One damage number.
-     *
-     * Screen mode is the safe/default mode: fixed start screen x/y, then rise.
-     * World mode is experimental. If world projection fails, the number falls
-     * back to the captured screen point instead of being deleted immediately.
-     */
     public class FloatingNumber extends Sprite
     {
         private var _app:FlyingDamageApp;
@@ -36,22 +29,46 @@ package com.flyingdamage
         private static const DEFAULT_RISE:Number = 55.0;
         private static const FADE_START:Number = 0.5;
 
-        public function FloatingNumber(app:FlyingDamageApp, data:Object)
+        public static function createScreen(app:FlyingDamageApp, x:Number, y:Number,
+                                            damage:int, colorRGB:uint,
+                                            fontSize:int, alpha:Number,
+                                            rise:Number, life:Number):FloatingNumber
+        {
+            return new FloatingNumber(app, "screen", x, y, 0, 0, 0, damage,
+                                      colorRGB, fontSize, alpha, rise, life);
+        }
+
+        public static function createWorld(app:FlyingDamageApp, wx:Number, wy:Number, wz:Number,
+                                           fallbackX:Number, fallbackY:Number,
+                                           damage:int, colorRGB:uint,
+                                           fontSize:int, alpha:Number,
+                                           rise:Number, life:Number):FloatingNumber
+        {
+            return new FloatingNumber(app, "world", fallbackX, fallbackY, wx, wy, wz,
+                                      damage, colorRGB, fontSize, alpha, rise, life);
+        }
+
+        public function FloatingNumber(app:FlyingDamageApp, mode:String,
+                                       startX:Number, startY:Number,
+                                       wx:Number, wy:Number, wz:Number,
+                                       damage:int, colorRGB:uint,
+                                       fontSize:int, baseAlpha:Number,
+                                       rise:Number, life:Number)
         {
             _app = app;
-            _mode = data.mode == null ? "screen" : String(data.mode);
-            _startX = Number(data.x);
-            _startY = Number(data.y);
-            _wx = Number(data.wx);
-            _wy = Number(data.wy);
-            _wz = Number(data.wz);
-            _rise = data.rise == null ? DEFAULT_RISE : Number(data.rise);
-            _lifeTime = data.life == null ? DEFAULT_LIFETIME : Number(data.life);
+            _mode = mode;
+            _startX = startX;
+            _startY = startY;
+            _wx = wx;
+            _wy = wy;
+            _wz = wz;
+            _rise = isNaN(rise) ? DEFAULT_RISE : rise;
+            _lifeTime = isNaN(life) ? DEFAULT_LIFETIME : life;
             if (_lifeTime <= 0.1) _lifeTime = DEFAULT_LIFETIME;
+            if (_rise <= 0.0) _rise = DEFAULT_RISE;
 
             _bornAt = getTimer();
-            _baseAlpha = Number(data.alpha);
-            if (isNaN(_baseAlpha)) _baseAlpha = 1.0;
+            _baseAlpha = isNaN(baseAlpha) ? 1.0 : baseAlpha;
 
             _tf = new TextField();
             _tf.autoSize = TextFieldAutoSize.CENTER;
@@ -62,11 +79,12 @@ package com.flyingdamage
             _tf.background = false;
             _tf.border = false;
             _tf.type = TextFieldType.DYNAMIC;
-            _tf.defaultTextFormat = new TextFormat("Arial", int(data.size), uint(data.color), true);
-            _tf.text = String(int(data.dmg));
-            _tf.x = -_tf.textWidth / 2.0;
-            _tf.y = -_tf.textHeight / 2.0;
-            _tf.filters = [ new GlowFilter(0x000000, 1.0, 3, 3, 3, 2) ];
+            _tf.embedFonts = false;
+            _tf.defaultTextFormat = new TextFormat("Arial", fontSize, colorRGB, true);
+            _tf.text = String(damage);
+            _tf.x = -_tf.textWidth / 2.0 - 4.0;
+            _tf.y = -_tf.textHeight / 2.0 - 4.0;
+            _tf.filters = [ new GlowFilter(0x000000, 1.0, 4, 4, 4, 2) ];
 
             addChild(_tf);
             this.alpha = _baseAlpha;
@@ -93,8 +111,6 @@ package com.flyingdamage
                 }
                 else
                 {
-                    // Do NOT delete the number. Fall back to the hit-time screen
-                    // point so the player still sees damage.
                     _worldFailed = true;
                     this.x = _startX;
                     this.y = _startY - DEFAULT_RISE * progress;
@@ -103,7 +119,7 @@ package com.flyingdamage
             else
             {
                 this.x = _startX;
-                this.y = _startY - DEFAULT_RISE * progress;
+                this.y = _startY - _rise * progress;
             }
 
             if (progress < FADE_START)
