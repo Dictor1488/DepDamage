@@ -1,0 +1,8 @@
+[
+  {
+    "itemID": "mods/flyingdamage/FlyingDamageBattle/layoutID",
+    "type": "Layout",
+    "path": "coui://gui/gameface/mods/flyingdamage/FlyingDamage/FlyingDamageBattle.html",
+    "parameters": { "extension": "", "entrance": "FlyingDamageBattle", "impl": "gameface" }
+  }
+]
