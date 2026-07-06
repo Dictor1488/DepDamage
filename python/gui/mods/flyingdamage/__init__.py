@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
 # Loads FlyingDamageApp.swf as an ExternalFlashComponent over the battle scene.
-# Damage is queued in Python and pulled by AS3 every tick. This avoids unstable
-# direct Python -> AS3 calls on some WoT clients.
+# Damage is queued in Python and pulled by AS3 every tick.
+# Coordinates are stored normalized 0..1 so the SWF is resolution-independent.
 
 import logging
 
@@ -42,9 +42,35 @@ _MAX_QUEUE = 64
 
 def _fmt_float(v):
     try:
-        return ('%.3f' % float(v)).rstrip('0').rstrip('.')
+        return ('%.6f' % float(v)).rstrip('0').rstrip('.')
     except Exception:
         return '0'
+
+
+def _screen_size():
+    try:
+        sw, sh = GUI.screenResolution()[:2]
+        sw = float(sw)
+        sh = float(sh)
+        if sw <= 0.0 or sh <= 0.0:
+            return 1920.0, 1080.0
+        return sw, sh
+    except Exception:
+        return 1920.0, 1080.0
+
+
+def _norm_xy(x, y):
+    sw, sh = _screen_size()
+    try:
+        nx = float(x) / sw
+        ny = float(y) / sh
+    except Exception:
+        nx, ny = 0.5, 0.5
+    # Do not hard clamp to 0..1. Slightly off-screen values may still be useful
+    # during edge cases, but keep them sane so broken projections cannot explode.
+    nx = max(-0.25, min(1.25, nx))
+    ny = max(-0.25, min(1.25, ny))
+    return nx, ny, sw, sh
 
 
 def _queue_record(record):
@@ -85,9 +111,15 @@ class _FlyingDamageMeta(BaseDAAPIModule):
     def py_projectWorld(self, x, y, z):
         try:
             from .hooks import projectWorldPoint
-            return projectWorldPoint(float(x), float(y), float(z))
+            pos = projectWorldPoint(float(x), float(y), float(z))
+            if pos and pos.get('ok'):
+                nx, ny, _sw, _sh = _norm_xy(pos.get('x', 0.0), pos.get('y', 0.0))
+                pos['x'] = nx
+                pos['y'] = ny
+                pos['normalized'] = True
+            return pos
         except Exception:
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
+            return {'x': 0.5, 'y': 0.5, 'ok': False, 'normalized': True}
 
     def as_populate(self):
         if self._isDAAPIInited():
@@ -96,16 +128,6 @@ class _FlyingDamageMeta(BaseDAAPIModule):
     def as_clear(self):
         if self._isDAAPIInited():
             self.flashObject.as_clear()
-
-    def as_showDamageScreen(self, x, y, damage, colorRGB, fontSize, alpha, rise, life):
-        if self._isDAAPIInited():
-            self.flashObject.as_showDamageScreen(x, y, damage, colorRGB, fontSize, alpha, rise, life)
-
-    def as_showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY,
-                           damage, colorRGB, fontSize, alpha, rise, life):
-        if self._isDAAPIInited():
-            self.flashObject.as_showDamageWorld(wx, wy, wz, fallbackX, fallbackY,
-                                                damage, colorRGB, fontSize, alpha, rise, life)
 
 
 class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
@@ -208,17 +230,11 @@ class Controller(object):
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def _debugTestDamage(self):
-        # Temporary diagnostic marker. If this 9999 is visible in battle, SWF
-        # rendering works. It is queued so AS3 pulls it itself.
         if self._flash is None or _testLog[0]:
             return
-        try:
-            sw, sh = GUI.screenResolution()[:2]
-        except Exception:
-            sw, sh = 1920, 1080
         _testLog[0] = True
-        logger.info('[FlyingDamage] queue debug test damage at center %.1f %.1f', sw / 2.0, sh / 2.0)
-        self.showDamageAt(sw / 2.0, sh / 2.0, 9999, 0x00FFFF, 36, 1.0, 80.0, 4.0)
+        logger.info('[FlyingDamage] queue debug test damage at normalized center 0.5 0.5')
+        self.showDamageNormalized(0.5, 0.5, 9999, 0x00FFFF, 36, 1.0, 0.075, 4.0)
 
     def _installSuppressionSafe(self):
         try:
@@ -272,32 +288,45 @@ class Controller(object):
         except Exception:
             pass
 
-    def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
+    def showDamageNormalized(self, nx, ny, damage, colorRGB, fontSize, alpha,
+                             riseNormalized=0.055, lifeTime=1.6):
         try:
-            rec = 'S|%s|%s|%d|%d|%d|%s|%s|%s' % (
-                _fmt_float(x), _fmt_float(y), int(damage), int(colorRGB), int(fontSize),
-                _fmt_float(alpha), _fmt_float(risePixels), _fmt_float(lifeTime))
+            rec = 'N|%s|%s|%d|%d|%d|%s|%s|%s' % (
+                _fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize),
+                _fmt_float(alpha), _fmt_float(riseNormalized), _fmt_float(lifeTime))
             _queue_record(rec)
             if _pushLog[0] < 20:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] queued screen d=%s x=%.1f y=%.1f',
-                            int(damage), float(x), float(y))
+                logger.info('[FlyingDamage] queued normalized d=%s nx=%.4f ny=%.4f',
+                            int(damage), float(nx), float(ny))
+        except Exception:
+            logger.error('[FlyingDamage] queue normalized failed', exc_info=True)
+
+    def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
+        try:
+            nx, ny, sw, sh = _norm_xy(x, y)
+            # Convert vertical rise in pixels to normalized screen height.
+            riseNorm = max(0.01, min(0.20, float(risePixels) / sh))
+            self.showDamageNormalized(nx, ny, damage, colorRGB, fontSize, alpha, riseNorm, lifeTime)
+            logger.info('[FlyingDamage] screen->normalized d=%s screen=(%.1f,%.1f) res=(%.0f,%.0f) norm=(%.4f,%.4f)',
+                        int(damage), float(x), float(y), sw, sh, nx, ny)
         except Exception:
             logger.error('[FlyingDamage] queue screen failed', exc_info=True)
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                         fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
         try:
+            nx, ny, sw, sh = _norm_xy(fallbackX, fallbackY)
             rec = 'W|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s' % (
                 _fmt_float(wx), _fmt_float(wy), _fmt_float(wz),
-                _fmt_float(fallbackX), _fmt_float(fallbackY),
+                _fmt_float(nx), _fmt_float(ny),
                 int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
                 _fmt_float(riseMeters), _fmt_float(lifeTime))
             _queue_record(rec)
             if _pushLog[0] < 20:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] queued world d=%s x=%.1f y=%.1f',
-                            int(damage), float(fallbackX), float(fallbackY))
+                logger.info('[FlyingDamage] queued world normalized d=%s norm=(%.4f,%.4f) res=(%.0f,%.0f)',
+                            int(damage), nx, ny, sw, sh)
         except Exception:
             logger.error('[FlyingDamage] queue world failed', exc_info=True)
 
