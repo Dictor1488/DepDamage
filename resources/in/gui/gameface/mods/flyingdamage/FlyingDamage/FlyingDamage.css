@@ -7,47 +7,34 @@ html, body {
   background: transparent;
 }
 * { box-sizing: border-box; }
-#fd-size-probe {
-  display: block;
-  width: 2560px;
-  height: 1369px;
-  opacity: 0;
+#fd-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
   pointer-events: none;
 }
-#fd-root {
-  position: absolute;
-  left: 0;
-  top: 0;
+#fd-hud {
+  display: block;
   width: 2560px;
   height: 1369px;
   overflow: visible;
   pointer-events: none;
-  z-index: 2147483647;
 }
-.fd-damage {
-  position: absolute;
-  left: 0;
-  top: 0;
-  transform: translate(-50%, -50%);
+.fd-damage-main {
   font-family: Arial, sans-serif;
   font-weight: 900;
-  line-height: 1;
-  white-space: nowrap;
-  color: #ff3838;
-  text-shadow:
-    -1px -1px 0 #2a0000,
-     1px -1px 0 #2a0000,
-    -1px  1px 0 #2a0000,
-     1px  1px 0 #2a0000,
-     0 0 5px rgba(0,0,0,0.95);
-  will-change: transform, opacity;
-  animation-name: fd-fly;
-  animation-timing-function: ease-out;
-  animation-fill-mode: forwards;
-  z-index: 2147483647;
+  text-anchor: middle;
+  dominant-baseline: central;
+  stroke: #2a0000;
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
-@keyframes fd-fly {
-  0%   { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
-  65%  { opacity: 1; transform: translate(-50%, -50%) translateY(-38px) scale(1.04); }
-  100% { opacity: 0; transform: translate(-50%, -50%) translateY(-72px) scale(0.98); }
+.fd-damage-shadow {
+  font-family: Arial, sans-serif;
+  font-weight: 900;
+  text-anchor: middle;
+  dominant-baseline: central;
+  fill: #000000;
+  opacity: 0.65;
 }
