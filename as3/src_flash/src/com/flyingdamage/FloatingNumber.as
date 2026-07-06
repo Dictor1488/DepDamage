@@ -1,6 +1,7 @@
 package com.flyingdamage
 {
     import flash.display.Sprite;
+    import flash.display.Shape;
     import flash.text.TextField;
     import flash.text.TextFormat;
     import flash.text.TextFieldAutoSize;
@@ -12,6 +13,7 @@ package com.flyingdamage
     {
         private var _app:FlyingDamageApp;
         private var _tf:TextField;
+        private var _dbg:Shape;
         private var _bornAt:int;
         private var _baseAlpha:Number;
         private var _mode:String;
@@ -24,6 +26,7 @@ package com.flyingdamage
         private var _wy:Number;
         private var _wz:Number;
         private var _vehicleID:int;
+        private var _projectLog:int = 0;
         private var _failed:Boolean = false;
 
         private static const DEFAULT_LIFETIME:Number = 1.6;
@@ -83,6 +86,13 @@ package com.flyingdamage
             _bornAt = getTimer();
             _baseAlpha = isNaN(baseAlpha) ? 1.0 : baseAlpha;
 
+            _dbg = new Shape();
+            _dbg.graphics.beginFill(0xFF00FF, 0.35);
+            _dbg.graphics.lineStyle(2, 0xFFFFFF, 1.0);
+            _dbg.graphics.drawRect(-48, -25, 96, 50);
+            _dbg.graphics.endFill();
+            addChild(_dbg);
+
             _tf = new TextField();
             _tf.autoSize = TextFieldAutoSize.CENTER;
             _tf.selectable = false;
@@ -102,7 +112,10 @@ package com.flyingdamage
             addChild(_tf);
             this.alpha = _baseAlpha;
             this.visible = true;
+            this.x = _startX;
+            this.y = _startY;
 
+            log("FloatingNumber create mode=" + _mode + " vid=" + _vehicleID + " start=(" + _startX + "," + _startY + ") text=" + damage + " stageItemVisible=" + this.visible);
             update();
         }
 
@@ -117,6 +130,11 @@ package com.flyingdamage
             if (_mode == "vehicle" && !_failed)
             {
                 var vpos:Object = _app.projectVehicle(_vehicleID, _rise * progress);
+                if (_projectLog < 8)
+                {
+                    _projectLog++;
+                    log("FloatingNumber project vehicle vid=" + _vehicleID + " ok=" + (vpos != null && vpos.ok) + " progress=" + progress + " pos=" + (vpos == null ? "null" : (vpos.x + "," + vpos.y)));
+                }
                 if (vpos != null && vpos.ok)
                 {
                     this.x = Number(vpos.x);
@@ -124,7 +142,8 @@ package com.flyingdamage
                 }
                 else
                 {
-                    _failed = true;
+                    // Do not hide/fail hard. Keep visible on fallback position so
+                    // we can distinguish projection failure from draw-layer failure.
                     this.x = _startX;
                     this.y = _startY - DEFAULT_RISE * progress;
                 }
@@ -139,7 +158,6 @@ package com.flyingdamage
                 }
                 else
                 {
-                    _failed = true;
                     this.x = _startX;
                     this.y = _startY - DEFAULT_RISE * progress;
                 }
@@ -167,6 +185,18 @@ package com.flyingdamage
                     _tf.parent.removeChild(_tf);
                 _tf = null;
             }
+            if (_dbg != null)
+            {
+                if (_dbg.parent != null)
+                    _dbg.parent.removeChild(_dbg);
+                _dbg = null;
+            }
+        }
+
+        private function log(msg:String):void
+        {
+            try { if (_app != null) _app.debugLog(msg); }
+            catch (e:Error) {}
         }
     }
 }
