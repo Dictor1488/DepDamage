@@ -15,11 +15,20 @@ logger = logging.getLogger(__name__)
 
 RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
 
+_OPENWG_OK = False
+_OPENWG_ERR = None
 try:
     from frameworks.wulf import ViewModel
-    from gui.impl.pub import ViewImpl, ViewSettings, WindowImpl, WindowFlags, ViewFlags
+    from gui.impl.pub import ViewImpl
+    try:
+        from gui.impl.pub.view_impl import ViewSettings, ViewFlags
+    except Exception:
+        from gui.impl.pub import ViewSettings, ViewFlags
+    try:
+        from gui.impl.pub.window_impl import WindowImpl, WindowFlags
+    except Exception:
+        from gui.impl.pub import WindowImpl, WindowFlags
     _OPENWG_OK = True
-    _OPENWG_ERR = None
 except Exception as _e:
     ViewModel = object
     ViewImpl = object
@@ -103,6 +112,8 @@ class Controller(object):
         logger.info('[FlyingDamageGF] controller.init begin')
         if not _OPENWG_OK:
             logger.error('[FlyingDamageGF] OpenWG/Gameface imports failed: %s', _OPENWG_ERR)
+        else:
+            logger.info('[FlyingDamageGF] OpenWG/Gameface imports OK')
 
         try:
             from .settings.config import g_config
@@ -185,6 +196,11 @@ class Controller(object):
             self._view = getattr(self._window, 'content', None)
             if self._view is None:
                 self._view = getattr(self._window, '_WindowImpl__content', None)
+            if self._view is None:
+                try:
+                    self._view = self._window.content
+                except Exception:
+                    pass
             logger.info('[FlyingDamageGF] Gameface window loaded view=%s', self._view is not None)
             return True
         except Exception:
