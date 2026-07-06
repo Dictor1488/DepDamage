@@ -1,6 +1,7 @@
 package com.flyingdamage
 {
     import flash.display.Sprite;
+    import flash.display.Shape;
     import flash.text.TextField;
     import flash.text.TextFormat;
     import flash.text.TextFieldAutoSize;
@@ -11,6 +12,7 @@ package com.flyingdamage
     public class FloatingNumber extends Sprite
     {
         private var _app:FlyingDamageApp;
+        private var _bg:Shape;
         private var _tf:TextField;
         private var _bornAt:int;
         private var _baseAlpha:Number;
@@ -69,6 +71,13 @@ package com.flyingdamage
 
             _bornAt = getTimer();
             _baseAlpha = isNaN(baseAlpha) ? 1.0 : baseAlpha;
+
+            _bg = new Shape();
+            _bg.graphics.beginFill(0xFF00FF, 0.55);
+            _bg.graphics.lineStyle(2, 0xFFFFFF, 1.0);
+            _bg.graphics.drawRect(-42, -22, 84, 44);
+            _bg.graphics.endFill();
+            addChild(_bg);
 
             _tf = new TextField();
             _tf.autoSize = TextFieldAutoSize.CENTER;
@@ -133,6 +142,12 @@ package com.flyingdamage
         public function dispose():void
         {
             _app = null;
+            if (_bg != null)
+            {
+                if (_bg.parent != null)
+                    _bg.parent.removeChild(_bg);
+                _bg = null;
+            }
             if (_tf != null)
             {
                 if (_tf.parent != null)
