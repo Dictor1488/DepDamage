@@ -1,14 +1,7 @@
 package com.flyingdamage
 {
     import flash.display.Sprite;
-    import flash.events.Event;
 
-    /**
-     * FlyingDamageApp -- Sprite overlay loaded via ExternalFlashComponent,
-     * mirroring DistanceMarker EXACTLY: the game calls as_populate() via DAAPI,
-     * which attaches ENTER_FRAME. Each frame we pull new damage from Python and
-     * update the floating numbers (stick to tank + fly upward).
-     */
     public class FlyingDamageApp extends Sprite
     {
         public var py_getScreenPos:Function = null;
@@ -16,57 +9,30 @@ package com.flyingdamage
         public var py_log:Function = null;
 
         private var _layer:DamageLayer = null;
+        private var _populateCount:int = 0;
+        private var _recvLog:int = 0;
 
         public function FlyingDamageApp()
         {
             super();
-            // Attach ENTER_FRAME as early as possible, and re-attach when added
-            // to stage. The visibility test proved the SWF renders; if the
-            // render loop runs, ENTER_FRAME should fire once we're on stage.
-            this.addEventListener(Event.ADDED_TO_STAGE, onAddedToStage);
-            this.addEventListener(Event.ENTER_FRAME, onEnterFrame);
         }
 
-        private var _efLogged:int = 0;
-
-        private function onAddedToStage(e:Event):void
-        {
-            log("ADDED_TO_STAGE fired");
-            if (this.stage != null)
-            {
-                this.stage.addEventListener(Event.ENTER_FRAME, onEnterFrame);
-                this.stage.frameRate = 60;
-            }
-        }
-
-        private function onEnterFrame(e:Event):void
-        {
-            if (_efLogged < 2)
-            {
-                _efLogged++;
-                log("ENTER_FRAME FIRED #" + _efLogged);
-            }
-            as_update();
-        }
-
-        // Called by the GAME via DAAPI when the SWF is ready.
+        // In this WoT Scaleform bridge, as_populate is the method that reliably
+        // reaches AS3. Python calls it repeatedly; we use it as a render tick.
         public function as_populate():void
         {
             _ensureLayer();
-            log("as_populate BUILD=old-visible-render+vehicle-anchor-fix");
+            _populateCount++;
+            if (_populateCount <= 5 || _populateCount % 300 == 0)
+                log("as_populate TICK BUILD=populate-driven-render count=" + _populateCount);
+            _tick();
         }
 
-        private var _updLogged:Boolean = false;
-
-        public function as_update():void
+        private function _tick():void
         {
-            if (!_updLogged)
-            {
-                _updLogged = true;
-                log("as_update REACHED SWF");
-            }
             if (_layer == null)
                 return;
+
             if (py_pullDamage != null)
             {
                 try
@@ -77,7 +43,11 @@ package com.flyingdamage
                         for (var i:int = 0; i < list.length; i++)
                         {
                             var d:Object = list[i];
-                            log("recv vid=" + d.vid + " dmg=" + d.dmg);
+                            if (_recvLog < 80)
+                            {
+                                _recvLog++;
+                                log("recv vid=" + d.vid + " dmg=" + d.dmg);
+                            }
                             _layer.showDamage(String(d.vid), int(d.dmg),
                                 uint(d.color), int(d.size), Number(d.alpha));
                         }
@@ -119,6 +89,7 @@ package com.flyingdamage
             {
                 _layer = new DamageLayer(this);
                 addChild(_layer);
+                log("DamageLayer created populate-driven");
             }
         }
 
