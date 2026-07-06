@@ -25,6 +25,9 @@ try:
     _IMPORT_STAGE = 'gui.impl.pub'
     from gui.impl.pub import ViewImpl, WindowImpl
 
+    _IMPORT_STAGE = 'openwg_gameface.ModDynAccessor'
+    from openwg_gameface import ModDynAccessor
+
     _OPENWG_OK = True
 except Exception as _e:
     ViewModel = object
@@ -33,13 +36,14 @@ except Exception as _e:
     WindowFlags = None
     ViewImpl = object
     WindowImpl = object
+    ModDynAccessor = None
     _OPENWG_OK = False
     _OPENWG_ERR = '%s: %s' % (_IMPORT_STAGE, _e)
 
 
 if _OPENWG_OK:
     class FlyingDamageModel(ViewModel):
-        """One string payload, same pattern as CustomHPBarGF."""
+        """One string payload, same practical pattern as CustomHPBarGF."""
 
         def __init__(self, properties=1, commands=0):
             super(FlyingDamageModel, self).__init__(properties=properties, commands=commands)
@@ -49,21 +53,19 @@ if _OPENWG_OK:
             self._addStringProperty('payload', '{}')
 
         def getPayload(self):
-            return self._getString('payload')
+            return self._getString(0)
 
         def setPayload(self, value):
-            self._setString('payload', value)
+            self._setString(0, value)
 
 
     class FlyingDamageView(ViewImpl):
+        viewLayoutID = ModDynAccessor(RES_MAP_ITEM_ID)
 
         def __init__(self):
-            settings = ViewSettings(RES_MAP_ITEM_ID)
-            try:
-                settings.flags = ViewFlags.VIEW
-            except Exception:
-                pass
-            settings.model = FlyingDamageModel()
+            layoutID = FlyingDamageView.viewLayoutID()
+            logger.info('[FlyingDamageGF] resolved layoutID=%s for %s', layoutID, RES_MAP_ITEM_ID)
+            settings = ViewSettings(layoutID, flags=ViewFlags.VIEW, model=FlyingDamageModel())
             super(FlyingDamageView, self).__init__(settings)
             self._lastRaw = None
 
@@ -76,11 +78,7 @@ if _OPENWG_OK:
             if raw == self._lastRaw:
                 return
             self._lastRaw = raw
-            model = self.viewModel
-            try:
-                with model.transaction() as tx:
-                    tx.setPayload(raw)
-            except Exception:
+            with self.viewModel.transaction() as model:
                 model.setPayload(raw)
 
 
