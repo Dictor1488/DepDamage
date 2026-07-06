@@ -1,7 +1,9 @@
 (function () {
     'use strict';
 
+    var NS = 'http://www.w3.org/2000/svg';
     var root = document.getElementById('fd-root');
+    var hud = document.getElementById('fd-hud');
     var lastPayload = '';
     var pollTimer = null;
     var lastEventId = 0;
@@ -30,32 +32,34 @@
         return '#' + s;
     }
 
-    function ensureRoot() {
+    function svgEl(name, attrs, parent) {
+        var e = document.createElementNS(NS, name);
+        if (attrs) {
+            for (var k in attrs) {
+                if (attrs.hasOwnProperty(k)) e.setAttribute(k, attrs[k]);
+            }
+        }
+        if (parent) parent.appendChild(e);
+        return e;
+    }
+
+    function ensureHud() {
         if (!root) root = document.getElementById('fd-root');
+        if (!hud) hud = document.getElementById('fd-hud');
         if (!root && document.body) {
             root = document.createElement('div');
             root.id = 'fd-root';
             document.body.appendChild(root);
         }
-        if (root) {
-            root.style.position = 'absolute';
-            root.style.left = '0px';
-            root.style.top = '0px';
-            root.style.width = '4096px';
-            root.style.height = '2160px';
-            root.style.overflow = 'visible';
-            root.style.pointerEvents = 'none';
-            root.style.zIndex = '2147483647';
+        if (!hud && root) {
+            hud = svgEl('svg', {
+                id: 'fd-hud',
+                width: '2560',
+                height: '1369',
+                viewBox: '0 0 2560 1369'
+            }, root);
         }
-        if (document.body) {
-            document.body.style.overflow = 'visible';
-            document.body.style.background = 'transparent';
-        }
-        if (document.documentElement) {
-            document.documentElement.style.overflow = 'visible';
-            document.documentElement.style.background = 'transparent';
-        }
-        return !!root;
+        return !!hud;
     }
 
     function viewportW() {
@@ -66,57 +70,60 @@
         return Math.max(1, window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight || 256);
     }
 
-    function isTinyView(vw, vh) {
-        return vw <= 320 && vh <= 320;
-    }
-
     function addDamage(ev) {
-        if (!ensureRoot() || !ev) return;
+        if (!ensureHud() || !ev) return;
 
         var vw = viewportW();
         var vh = viewportH();
         var sw = Math.max(1, num(ev.sw, 2560));
         var sh = Math.max(1, num(ev.sh, 1369));
-        var tiny = isTinyView(vw, vh);
+        var x = clamp(num(ev.x, sw * 0.5), -2000, sw + 2000);
+        var y = clamp(num(ev.y, sh * 0.5), -2000, sh + 2000);
+        var textValue = String(Math.round(num(ev.dmg, 0)));
+        var size = Math.max(24, num(ev.size, 36));
+        var life = Math.max(0.8, num(ev.life, 1.6));
+        var color = colorFromInt(ev.color);
 
-        var x;
-        var y;
-        if (tiny && !ev.noScale) {
-            // Visibility fallback: if Gameface clamps the view to 256x256,
-            // map real screen coordinates into that visible square.
-            x = clamp(num(ev.x, sw * 0.5) / sw * vw, 8, vw - 8);
-            y = clamp(num(ev.y, sh * 0.5) / sh * vh, 8, vh - 8);
-        } else {
-            x = clamp(num(ev.x, sw * 0.5), -2000, sw + 2000);
-            y = clamp(num(ev.y, sh * 0.5), -2000, sh + 2000);
+        var g = svgEl('g', { transform: 'translate(' + x + ' ' + y + ')' }, hud);
+        var shadow = svgEl('text', {
+            'class': 'fd-damage-shadow',
+            x: '3',
+            y: '3',
+            'font-size': String(size)
+        }, g);
+        shadow.textContent = textValue;
+
+        var main = svgEl('text', {
+            'class': 'fd-damage-main',
+            x: '0',
+            y: '0',
+            fill: color,
+            'font-size': String(size),
+            opacity: String(Math.max(0.2, Math.min(1, num(ev.alpha, 1))))
+        }, g);
+        main.textContent = textValue;
+
+        log('draw-svg dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh + ' screen=' + sw + 'x' + sh);
+
+        var start = Date.now();
+        function anim() {
+            var t = Math.min(1, (Date.now() - start) / (life * 1000));
+            var dy = -72 * t;
+            var sc = 1 + 0.04 * (1 - Math.abs(t * 2 - 1));
+            var op = t < 0.72 ? 1 : Math.max(0, 1 - (t - 0.72) / 0.28);
+            g.setAttribute('transform', 'translate(' + x + ' ' + (y + dy) + ') scale(' + sc + ')');
+            main.setAttribute('opacity', String(op));
+            shadow.setAttribute('opacity', String(op * 0.65));
+            if (t < 1) window.requestAnimationFrame(anim);
+            else if (g && g.parentNode) g.parentNode.removeChild(g);
         }
-
-        var el = document.createElement('div');
-        el.className = 'fd-damage';
-        el.textContent = String(Math.round(num(ev.dmg, 0)));
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
-        el.style.color = colorFromInt(ev.color);
-        el.style.fontSize = Math.max(tiny ? 34 : 24, num(ev.size, tiny ? 42 : 34)) + 'px';
-        el.style.opacity = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
-        el.style.animationDuration = Math.max(0.8, num(ev.life, 1.6)) + 's';
-        el.style.zIndex = '2147483647';
-        root.appendChild(el);
-
-        log('draw dmg=' + el.textContent + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + vw + 'x' + vh + ' screen=' + sw + 'x' + sh + ' tiny=' + tiny);
-
-        window.setTimeout(function () {
-            if (el && el.parentNode) el.parentNode.removeChild(el);
-        }, Math.max(900, num(ev.life, 1.6) * 1000 + 500));
+        window.requestAnimationFrame(anim);
     }
 
     function showBootMarker() {
         if (bootShown) return;
         bootShown = true;
-        // Always visible if the layer renders at all: center of the 256x256 fallback.
-        addDamage({ id: -2, x: 128, y: 128, sw: 256, sh: 256, dmg: 7777, color: 0x66FF66, size: 48, alpha: 1, life: 12.0, noScale: true });
-        // Full-screen coordinate test.
-        addDamage({ id: -1, x: 1280, y: 180, sw: 2560, sh: 1369, dmg: 9999, color: 0xFFFF33, size: 54, alpha: 1, life: 8.0 });
+        addDamage({ id: -1, x: 1280, y: 180, sw: 2560, sh: 1369, dmg: 9999, color: 0x66FF66, size: 54, alpha: 1, life: 8.0 });
     }
 
     function getRawPayload() {
@@ -169,8 +176,8 @@
     }
 
     function initialize() {
-        ensureRoot();
-        log('initialize view=' + viewportW() + 'x' + viewportH() + ' root=' + !!root);
+        ensureHud();
+        log('initialize-svg view=' + viewportW() + 'x' + viewportH() + ' hud=' + !!hud);
         showBootMarker();
         tick();
         window.setTimeout(tick, 50);
@@ -196,9 +203,5 @@
         });
     } else {
         initialize();
-        var demoId = 1;
-        window.setInterval(function () {
-            addDamage({ id: demoId++, x: 400 + Math.random() * 300, y: 300 + Math.random() * 100, sw: 1920, sh: 1080, dmg: 814, color: 0xFF3838, size: 28, alpha: 1, life: 1.6 });
-        }, 1200);
     }
 }());
