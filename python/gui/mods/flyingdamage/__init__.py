@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
 # Gameface renderer for FlyingDamage. No AS3/SWF bridge is used.
-# Diagnostic build: logs available WULF/OpenWG API names so we can bind to the
-# exact classes present in this WoT client instead of guessing import paths.
+# Python catches damage, projects the vehicle to screen pixels, then pushes a
+# JSON payload into a WULF/Gameface view. JS draws the number as a DOM element.
 
 import json
 import logging
@@ -18,82 +18,23 @@ RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
 _OPENWG_OK = False
 _OPENWG_ERR = None
 _IMPORT_STAGE = 'start'
-_IMPORT_DIAG_DONE = [False]
-
 try:
-    _IMPORT_STAGE = 'frameworks.wulf.ViewModel'
-    from frameworks.wulf import ViewModel
+    _IMPORT_STAGE = 'frameworks.wulf'
+    from frameworks.wulf import ViewModel, ViewSettings, ViewFlags, WindowFlags
 
-    _IMPORT_STAGE = 'gui.impl.pub.ViewImpl'
-    from gui.impl.pub import ViewImpl
-
-    _IMPORT_STAGE = 'ViewSettings candidates'
-    ViewSettings = None
-    _viewSettingsErrors = []
-    for _modName in (
-        'gui.impl.pub',
-        'gui.impl.pub.view_impl',
-        'gui.impl.pub.view_settings',
-        'gui.impl.pub.view_settings_model',
-        'gui.impl.pub.view_settings_utils',
-    ):
-        try:
-            _mod = __import__(_modName, fromlist=['ViewSettings'])
-            _candidate = getattr(_mod, 'ViewSettings', None)
-            if _candidate is not None:
-                ViewSettings = _candidate
-                break
-            _viewSettingsErrors.append('%s:no ViewSettings' % _modName)
-        except Exception as _e:
-            _viewSettingsErrors.append('%s:%s' % (_modName, _e))
-    if ViewSettings is None:
-        raise ImportError('; '.join(_viewSettingsErrors))
-
-    _IMPORT_STAGE = 'WindowImpl/WindowFlags'
-    try:
-        from gui.impl.pub.window_impl import WindowImpl, WindowFlags
-    except Exception:
-        from gui.impl.pub import WindowImpl, WindowFlags
+    _IMPORT_STAGE = 'gui.impl.pub'
+    from gui.impl.pub import ViewImpl, WindowImpl
 
     _OPENWG_OK = True
 except Exception as _e:
     ViewModel = object
-    ViewImpl = object
     ViewSettings = None
-    WindowImpl = object
+    ViewFlags = None
     WindowFlags = None
+    ViewImpl = object
+    WindowImpl = object
     _OPENWG_OK = False
     _OPENWG_ERR = '%s: %s' % (_IMPORT_STAGE, _e)
-
-
-def _diag_imports():
-    if _IMPORT_DIAG_DONE[0]:
-        return
-    _IMPORT_DIAG_DONE[0] = True
-    names = (
-        'frameworks.wulf',
-        'gui.impl.pub',
-        'gui.impl.pub.view_impl',
-        'gui.impl.pub.window_impl',
-        'gui.impl.gen',
-        'net.openwg.gameface',
-        'net.openwg.gui',
-        'openwg.gameface',
-    )
-    keywords = ('View', 'Window', 'Settings', 'Flag', 'Model', 'GF', 'Gameface', 'GameFace')
-    for modName in names:
-        try:
-            mod = __import__(modName, fromlist=['*'])
-            found = []
-            for n in dir(mod):
-                for key in keywords:
-                    if key in n:
-                        found.append(n)
-                        break
-            found = sorted(found)[:80]
-            logger.info('[FlyingDamageGF][DIAG] module %s OK names=%s', modName, ','.join(found))
-        except Exception as e:
-            logger.info('[FlyingDamageGF][DIAG] module %s FAIL %s', modName, e)
 
 
 if _OPENWG_OK:
@@ -118,6 +59,10 @@ if _OPENWG_OK:
 
         def __init__(self):
             settings = ViewSettings(RES_MAP_ITEM_ID)
+            try:
+                settings.flags = ViewFlags.VIEW
+            except Exception:
+                pass
             settings.model = FlyingDamageModel()
             super(FlyingDamageView, self).__init__(settings)
             self._lastRaw = None
@@ -164,7 +109,6 @@ class Controller(object):
         logger.info('[FlyingDamageGF] controller.init begin')
         if not _OPENWG_OK:
             logger.error('[FlyingDamageGF] OpenWG/Gameface imports failed: %s', _OPENWG_ERR)
-            _diag_imports()
         else:
             logger.info('[FlyingDamageGF] OpenWG/Gameface imports OK')
 
@@ -242,7 +186,6 @@ class Controller(object):
             if not self._loadTried:
                 self._loadTried = True
                 logger.error('[FlyingDamageGF] cannot load window: OpenWG/Gameface unavailable: %s', _OPENWG_ERR)
-                _diag_imports()
             return False
         try:
             self._window = FlyingDamageWindow()
