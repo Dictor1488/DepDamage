@@ -2,7 +2,7 @@
 # flyingdamage/__init__.py  --  Python 2.7
 # Gameface renderer for FlyingDamage. No AS3/SWF bridge is used.
 # Python catches damage, projects the vehicle to screen pixels, then pushes a
-# JSON payload into a WULF/Gameface view. JS draws the numbers.
+# JSON payload into a WULF/Gameface view. JS draws the numbers as SVG text.
 
 import json
 import logging
@@ -85,16 +85,13 @@ if _OPENWG_OK:
     class FlyingDamageWindow(WindowImpl):
 
         def __init__(self):
-            flags = WindowFlags.WINDOW
-            try:
-                flags = flags | WindowFlags.WINDOW_FULLSCREEN
-            except Exception:
-                pass
+            # Exact same simple WULF path as working CustomHPBarGF: WindowFlags.WINDOW -> layer 7.
+            # Visibility/size is handled by SVG document structure, not by fullscreen flags.
             super(FlyingDamageWindow, self).__init__(
-                wndFlags=flags,
+                wndFlags=WindowFlags.WINDOW,
                 content=FlyingDamageView()
             )
-            logger.info('[FlyingDamageGF] fullscreen WindowImpl flags=%s visibility test path', flags)
+            logger.info('[FlyingDamageGF] HPBar-style SVG WindowImpl layer7 path')
 else:
     FlyingDamageWindow = None
 
