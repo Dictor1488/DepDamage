@@ -9,13 +9,12 @@ package com.flyingdamage
     /**
      * FlyingDamageApp -- ExternalFlashComponent.
      *
-     * Important Scaleform quirk: GUI.Flash is centered by its SWF dimensions.
-     * The proven workaround used by DistanceMarker is a small 800x600 SWF and
-     * root correction: root.x = 400 - screenWidth / 2, root.y = 300 - screenHeight / 2.
+     * GUI.Flash is centered by its SWF dimensions. The root sprite is shifted so
+     * the 800x600 SWF can cover the real screen. Therefore all screen pixel
+     * coordinates from Python must be converted to this corrected local space.
      */
     public class FlyingDamageApp extends Sprite
     {
-        // Must match workflow mxmlc -default-size=800,600.
         private static const SWF_HALF_WIDTH:Number = 400.0;
         private static const SWF_HALF_HEIGHT:Number = 300.0;
 
@@ -65,8 +64,11 @@ package com.flyingdamage
             if (!_selfTestShown)
             {
                 _selfTestShown = true;
-                // Direct AS3 self-test. If this is visible, AS3 rendering is OK.
-                as_showDamageScreen(400, 300, 8888, 0x00FFFF, 42, 1.0, 80, 4.0);
+                // Show near the real screen centre. as_showDamageScreen converts
+                // this screen-space point to SWF-local coordinates.
+                as_showDamageScreen(stage != null ? stage.stageWidth / 2.0 : 1280,
+                                    stage != null ? stage.stageHeight / 2.0 : 684,
+                                    8888, 0x00FFFF, 42, 1.0, 80, 4.0);
             }
         }
 
@@ -79,10 +81,12 @@ package com.flyingdamage
             _updateAppPosition();
             try
             {
-                _layer.showScreenDamage(x, y, damage, colorRGB, fontSize, alpha, rise, life);
+                var lx:Number = _screenToLocalX(x);
+                var ly:Number = _screenToLocalY(y);
+                _layer.showScreenDamage(lx, ly, damage, colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
                 if (_debugShown <= 24)
-                    log("as_showDamageScreen d=" + damage + " x=" + x + " y=" + y + " root=(" + this.x + "," + this.y + ")");
+                    log("as_showDamageScreen d=" + damage + " screen=(" + x + "," + y + ") local=(" + lx + "," + ly + ") root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
@@ -100,11 +104,13 @@ package com.flyingdamage
             _updateAppPosition();
             try
             {
-                _layer.showWorldDamage(wx, wy, wz, fallbackX, fallbackY, damage,
+                var lx:Number = _screenToLocalX(fallbackX);
+                var ly:Number = _screenToLocalY(fallbackY);
+                _layer.showWorldDamage(wx, wy, wz, lx, ly, damage,
                                        colorRGB, fontSize, alpha, rise, life);
                 _debugShown++;
                 if (_debugShown <= 24)
-                    log("as_showDamageWorld d=" + damage + " x=" + fallbackX + " y=" + fallbackY + " root=(" + this.x + "," + this.y + ")");
+                    log("as_showDamageWorld d=" + damage + " screen=(" + fallbackX + "," + fallbackY + ") local=(" + lx + "," + ly + ") root=(" + this.x + "," + this.y + ")");
             }
             catch (e:Error)
             {
@@ -142,7 +148,16 @@ package com.flyingdamage
         {
             if (py_projectWorld == null)
                 return null;
-            try { return py_projectWorld(wx, wy, wz); }
+            try
+            {
+                var pos:Object = py_projectWorld(wx, wy, wz);
+                if (pos != null && pos.ok)
+                {
+                    pos.x = _screenToLocalX(Number(pos.x));
+                    pos.y = _screenToLocalY(Number(pos.y));
+                }
+                return pos;
+            }
             catch (e:Error) {}
             return null;
         }
@@ -171,6 +186,16 @@ package com.flyingdamage
                 _positionLogged = true;
                 log("root corrected to x=" + this.x + " y=" + this.y + " for screen=" + sw + "x" + sh);
             }
+        }
+
+        private function _screenToLocalX(screenX:Number):Number
+        {
+            return screenX - this.x;
+        }
+
+        private function _screenToLocalY(screenY:Number):Number
+        {
+            return screenY - this.y;
         }
 
         private function onTick(e:TimerEvent):void
