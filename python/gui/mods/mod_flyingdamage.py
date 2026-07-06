@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-# mod_flyingdamage.py  --  Python 2.7 entry point (SWF battle-view version)
+# mod_flyingdamage.py  --  Python 2.7 entry point (native GUI renderer)
 
 import logging
 
 logger = logging.getLogger(__name__)
-logger.info('[FlyingDamage] === module imported (SWF view) ===')
+logger.info('[FlyingDamage] === module imported (native GUI renderer) ===')
 
 
 def init():
