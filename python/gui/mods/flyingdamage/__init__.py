@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Battle marker-layer renderer for FlyingDamage.
+# Existing vehicle marker renderer for FlyingDamage.
 #
-# All previous overlay approaches created/logged correctly but were not visible
-# for the user. This build renders through the game's own markers2d canvas by
-# creating short-lived VehicleMarker symbols bound to world matrices.
+# This build no longer creates fake markers or overlay GUI. It modifies the
+# already-visible marker of the damaged vehicle for a short time, using the same
+# VehicleMarkerPlugin markerID that the game uses for tank HP/name markers.
 
 import logging
 
 import BigWorld
-import Math
 
 from PlayerEvents import g_playerEvents
 
@@ -19,8 +18,8 @@ _pushLog = [0]
 _testLog = [False]
 _markerParent = [None]
 _markerPlugin = [None]
-_markerIDs = set()
 _markerHookInstalled = [False]
+_restoreCallbacks = {}
 
 
 def _installMarkerLayerHook():
@@ -40,7 +39,8 @@ def _installMarkerLayerHook():
         try:
             _markerParent[0] = self._parentObj
             _markerPlugin[0] = self
-            logger.info('[FlyingDamage] marker layer captured: %s', _markerParent[0])
+            logger.info('[FlyingDamage] marker layer captured: %s markers=%s',
+                        _markerParent[0], len(getattr(self, '_markers', {})))
         except Exception:
             logger.error('[FlyingDamage] marker layer capture failed', exc_info=True)
         return result
@@ -48,7 +48,7 @@ def _installMarkerLayerHook():
     def newStop(self, *args, **kwargs):
         try:
             if _markerPlugin[0] is self:
-                _destroyAllMarkerDamage()
+                _cancelRestores()
                 _markerParent[0] = None
                 _markerPlugin[0] = None
                 logger.info('[FlyingDamage] marker layer released')
@@ -62,105 +62,73 @@ def _installMarkerLayerHook():
     logger.info('[FlyingDamage] VehicleMarkerPlugin hook installed')
 
 
-def _destroyMarker(markerID):
-    parent = _markerParent[0]
+def _cancelRestores():
+    for cbid in list(_restoreCallbacks.values()):
+        try:
+            BigWorld.cancelCallback(cbid)
+        except Exception:
+            pass
+    _restoreCallbacks.clear()
+
+
+def _getExistingMarkerID(vehicleID):
     try:
-        if parent is not None:
-            parent.destroyMarker(markerID)
-    except Exception:
-        logger.error('[FlyingDamage] destroy marker failed id=%s', markerID, exc_info=True)
-    try:
-        _markerIDs.discard(markerID)
-    except Exception:
-        pass
-
-
-def _destroyAllMarkerDamage():
-    for markerID in list(_markerIDs):
-        _destroyMarker(markerID)
-    try:
-        _markerIDs.clear()
-    except Exception:
-        pass
-
-
-def _makeMatrix(x, y, z):
-    m = Math.Matrix()
-    m.setTranslate(Math.Vector3(float(x), float(y), float(z)))
-    return m
-
-
-def _entityAnchorFromVehicleID(vehicleID):
-    try:
-        vehicle = BigWorld.entity(int(vehicleID))
-        if vehicle is None:
+        plugin = _markerPlugin[0]
+        if plugin is None:
             return None
-        pos = getattr(vehicle, 'position', None)
-        if pos is None:
-            tmp = Math.Matrix()
-            tmp.set(vehicle.matrix)
-            pos = tmp.translation
-        return (float(pos.x), float(pos.y) + 4.5, float(pos.z))
+        marker = getattr(plugin, '_markers', {}).get(int(vehicleID))
+        if marker is None:
+            return None
+        return marker.getMarkerID()
     except Exception:
+        logger.error('[FlyingDamage] get existing marker failed vid=%s', vehicleID, exc_info=True)
         return None
 
 
-def _playerAnchor():
+def _getAnyExistingMarkerID():
     try:
-        player = BigWorld.player()
-        vid = getattr(player, 'playerVehicleID', None)
-        if vid is None:
-            vid = getattr(player, 'vehicleID', None)
-        anchor = _entityAnchorFromVehicleID(vid)
-        if anchor is not None:
-            return anchor
-    except Exception:
-        pass
-    try:
-        for entity in BigWorld.entities.values():
-            if hasattr(entity, 'isStarted') and getattr(entity, 'isStarted', False):
-                pos = getattr(entity, 'position', None)
-                if pos is not None:
-                    return (float(pos.x), float(pos.y) + 4.5, float(pos.z))
+        plugin = _markerPlugin[0]
+        if plugin is None:
+            return None
+        markers = getattr(plugin, '_markers', {})
+        for _vid, marker in markers.iteritems():
+            return marker.getMarkerID()
     except Exception:
         pass
     return None
 
 
-class _MarkerLayerRenderer(object):
+class _ExistingMarkerRenderer(object):
 
     def __init__(self):
         self.enabled = False
 
     def start(self):
         self.enabled = True
-        logger.info('[FlyingDamage] marker-layer renderer started')
+        logger.info('[FlyingDamage] existing-marker renderer started')
 
     def stop(self):
         self.enabled = False
-        _destroyAllMarkerDamage()
-        logger.info('[FlyingDamage] marker-layer renderer stopped')
+        _cancelRestores()
+        logger.info('[FlyingDamage] existing-marker renderer stopped')
 
-    def showWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
-                  fontSize, alpha, riseMeters, lifeTime):
+    def showOnVehicle(self, vehicleID, damage, colorRGB, fontSize, alpha, lifeTime):
         if not self.enabled:
             return False
         parent = _markerParent[0]
         if parent is None:
-            logger.info('[FlyingDamage] marker layer not ready; cannot show d=%s', int(damage))
+            logger.info('[FlyingDamage] marker parent not ready; cannot show d=%s vid=%s', int(damage), vehicleID)
             return False
+
+        markerID = _getExistingMarkerID(vehicleID)
+        if markerID is None:
+            logger.info('[FlyingDamage] existing marker not found vid=%s d=%s', vehicleID, int(damage))
+            return False
+
+        txt = str(int(damage))
         try:
-            from gui.Scaleform.daapi.view.battle.shared.markers2d import settings as markerSettings
-
-            markerID = parent.createMarker(
-                markerSettings.MARKER_SYMBOL_NAME.VEHICLE_MARKER,
-                matrixProvider=_makeMatrix(wx, wy, wz),
-                active=True,
-                markerType=markerSettings.CommonMarkerType.VEHICLE)
-            _markerIDs.add(markerID)
-
-            txt = str(int(damage))
-            maxHP = max(int(damage), 1)
+            # This changes only an already visible vehicle marker. It is the
+            # safest visible test: no fake VehicleMarker, no empty atlas icon.
             try:
                 parent.setMarkerTextLabelEnabled(markerID, True)
             except Exception:
@@ -170,42 +138,79 @@ class _MarkerLayerRenderer(object):
             except Exception:
                 pass
             try:
-                parent.invokeMarker(markerID, 'setVehicleInfo',
-                                    'mediumTank', '', txt, 10,
-                                    txt, txt, '', '', maxHP,
-                                    'enemy', False, 0, '')
-                parent.invokeMarker(markerID, 'setHealth', maxHP)
                 parent.invokeMarker(markerID, 'update')
             except Exception:
-                logger.error('[FlyingDamage] init temp vehicle marker failed', exc_info=True)
+                pass
 
-            if _pushLog[0] < 40:
+            if _pushLog[0] < 60:
                 _pushLog[0] += 1
-                logger.info('[FlyingDamage] MARKER_LAYER show d=%s markerID=%s world=(%.2f,%.2f,%.2f)',
-                            int(damage), markerID, float(wx), float(wy), float(wz))
+                logger.info('[FlyingDamage] EXISTING_MARKER show d=%s vid=%s markerID=%s text=%s',
+                            int(damage), vehicleID, markerID, txt)
 
-            self._animateMarker(markerID, float(wx), float(wy), float(wz),
-                                float(riseMeters), max(0.5, float(lifeTime)), BigWorld.time())
+            self._scheduleRestore(markerID, max(0.5, float(lifeTime)))
             return True
         except Exception:
-            logger.error('[FlyingDamage] marker-layer show failed', exc_info=True)
+            logger.error('[FlyingDamage] existing marker show failed vid=%s markerID=%s',
+                         vehicleID, markerID, exc_info=True)
             return False
 
-    def _animateMarker(self, markerID, wx, wy, wz, riseMeters, lifeTime, started):
+    def showDebug(self):
         parent = _markerParent[0]
-        if parent is None or markerID not in _markerIDs:
+        if parent is None:
+            logger.info('[FlyingDamage] existing-marker debug: parent not ready')
+            return False
+        markerID = _getAnyExistingMarkerID()
+        if markerID is None:
+            logger.info('[FlyingDamage] existing-marker debug: no existing markers yet')
+            return False
+        try:
+            parent.setMarkerTextLabelEnabled(markerID, True)
+            parent.setMarkerCustomDistanceStr(markerID, '9999')
+            try:
+                parent.invokeMarker(markerID, 'update')
+            except Exception:
+                pass
+            logger.info('[FlyingDamage] EXISTING_MARKER debug markerID=%s text=9999', markerID)
+            self._scheduleRestore(markerID, 5.0)
+            return True
+        except Exception:
+            logger.error('[FlyingDamage] existing-marker debug failed', exc_info=True)
+            return False
+
+    def _scheduleRestore(self, markerID, lifeTime):
+        try:
+            old = _restoreCallbacks.pop(markerID, None)
+            if old is not None:
+                try:
+                    BigWorld.cancelCallback(old)
+                except Exception:
+                    pass
+            _restoreCallbacks[markerID] = BigWorld.callback(lifeTime, lambda: self._restore(markerID))
+        except Exception:
+            logger.error('[FlyingDamage] schedule restore failed markerID=%s', markerID, exc_info=True)
+
+    def _restore(self, markerID):
+        _restoreCallbacks.pop(markerID, None)
+        parent = _markerParent[0]
+        if parent is None:
             return
         try:
-            age = BigWorld.time() - started
-            if age >= lifeTime:
-                _destroyMarker(markerID)
-                return
-            p = age / lifeTime
-            parent.setMarkerMatrix(markerID, _makeMatrix(wx, wy + riseMeters * p, wz))
-            BigWorld.callback(0.05, lambda: self._animateMarker(markerID, wx, wy, wz, riseMeters, lifeTime, started))
+            # Reset custom distance text. Do not destroy or recreate anything.
+            try:
+                parent.setMarkerCustomDistanceStr(markerID, '')
+            except Exception:
+                pass
+            try:
+                parent.setMarkerTextLabelEnabled(markerID, False)
+            except Exception:
+                pass
+            try:
+                parent.invokeMarker(markerID, 'update')
+            except Exception:
+                pass
+            logger.info('[FlyingDamage] EXISTING_MARKER restore markerID=%s', markerID)
         except Exception:
-            logger.error('[FlyingDamage] marker-layer animate failed id=%s', markerID, exc_info=True)
-            _destroyMarker(markerID)
+            logger.error('[FlyingDamage] existing marker restore failed markerID=%s', markerID, exc_info=True)
 
 
 class Controller(object):
@@ -213,10 +218,10 @@ class Controller(object):
     def __init__(self):
         self._enabled = True
         self._battleMode = False
-        self._renderer = _MarkerLayerRenderer()
+        self._renderer = _ExistingMarkerRenderer()
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (vehicle marker layer)')
+        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers)')
         _installMarkerLayerHook()
         try:
             from .settings.config import g_config
@@ -259,14 +264,14 @@ class Controller(object):
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
         _testLog[0] = False
-        logger.info('[FlyingDamage] avatar ready -> marker-layer renderer active')
+        logger.info('[FlyingDamage] avatar ready -> existing-marker renderer active')
         self._renderer.start()
         try:
             from .hooks import setView
             setView(self)
         except Exception:
             pass
-        # Try several times because VehicleMarkerPlugin may start after avatar ready.
+        # Several attempts because marker plugin and its _markers are populated after battle UI creation.
         BigWorld.callback(2.0, self._debugTestDamage)
         BigWorld.callback(5.0, self._debugTestDamage)
         BigWorld.callback(8.0, self._debugTestDamage)
@@ -275,17 +280,8 @@ class Controller(object):
     def _debugTestDamage(self):
         if not self._battleMode or _testLog[0]:
             return
-        anchor = _playerAnchor()
-        if anchor is None:
-            logger.info('[FlyingDamage] marker-layer debug: no player/world anchor yet')
-            return
-        if _markerParent[0] is None:
-            logger.info('[FlyingDamage] marker-layer debug: marker parent not captured yet')
-            return
-        _testLog[0] = True
-        wx, wy, wz = anchor
-        logger.info('[FlyingDamage] marker-layer debug test world=(%.2f,%.2f,%.2f)', wx, wy, wz)
-        self.showDamageWorld(wx, wy, wz, 0.0, 0.0, 9999, 0x00FFFF, 36, 1.0, 2.0, 5.0)
+        if self._renderer.showDebug():
+            _testLog[0] = True
 
     def _installSuppressionSafe(self):
         try:
@@ -313,18 +309,21 @@ class Controller(object):
             pass
 
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
-        # Screen overlay path is intentionally disabled for this build. We need a
-        # real world point so the game marker canvas can render it.
+        # Screen-only damage cannot be attached to an existing vehicle marker.
         if _pushLog[0] < 10:
             _pushLog[0] += 1
-            logger.info('[FlyingDamage] screen damage ignored by marker-layer renderer d=%s', int(damage))
+            logger.info('[FlyingDamage] screen damage ignored by existing-marker renderer d=%s', int(damage))
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
-                        fontSize, alpha, riseMeters=1.35, lifeTime=1.6):
+                        fontSize, alpha, riseMeters=1.35, lifeTime=1.6, vehicleID=None):
         if not self._battleMode:
             return
-        self._renderer.showWorld(wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
-                                 fontSize, alpha, riseMeters, lifeTime)
+        if vehicleID is None:
+            if _pushLog[0] < 10:
+                _pushLog[0] += 1
+                logger.info('[FlyingDamage] missing vehicleID for existing-marker damage d=%s', int(damage))
+            return
+        self._renderer.showOnVehicle(vehicleID, damage, colorRGB, fontSize, alpha, lifeTime)
 
     def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
         self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
