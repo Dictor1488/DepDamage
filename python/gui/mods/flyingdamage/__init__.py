@@ -1,279 +1,192 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Existing vehicle marker renderer for FlyingDamage.
+# Custom SWF renderer for FlyingDamage.
 #
-# Current WoT build exposes only markerInvoke on the vehicle marker canvas. The
-# separate text-label/distance APIs are not present, so this build drives the
-# already-visible VehicleMarker's native updateHealth/setHealth methods. This is
-# a visibility test for the marker's built-in hit/health animation path.
+# Damage numbers are rendered by FlyingDamageApp.swf. The important difference
+# from the old screen-fixed build: world_anchor damage is queued with vehicleID,
+# and AS3 asks Python for the current vehicle projection on every tick. This
+# keeps the flying number attached to the damaged tank while camera/tank moves.
 
 import logging
 
 import BigWorld
-
+import GUI
+import SCALEFORM
 from PlayerEvents import g_playerEvents
 
 logger = logging.getLogger(__name__)
 
+try:
+    from gui import DEPTH_OF_VehicleMarker as _DEPTH
+except Exception:
+    try:
+        from gui import DEPTH_OF_Battle as _DEPTH
+    except Exception:
+        _DEPTH = 0.0
+
+from gui.Scaleform.daapi.view.external_components import (
+    ExternalFlashComponent, ExternalFlashSettings)
+from gui.Scaleform.framework.entities.BaseDAAPIModule import BaseDAAPIModule
+
+try:
+    from gui.Scaleform.flash_wrapper import InputKeyMode
+except Exception:
+    InputKeyMode = None
+
+
+_SWF_NAME = 'FlyingDamageApp.swf'
+_LINKAGE = 'FlyingDamageApp'
 _pushLog = [0]
+_pullLog = [0]
 _testLog = [False]
-_markerParent = [None]
-_markerPlugin = [None]
-_markerHookInstalled = [False]
-_restoreCallbacks = {}
-_canvasLog = [False]
+_damageQueue = []
+_MAX_QUEUE = 128
+_HIGH_DEPTH = 9999.0
 
 
-def _installMarkerLayerHook():
-    if _markerHookInstalled[0]:
-        return
+def _fmt_float(v):
     try:
-        from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
+        return ('%.6f' % float(v)).rstrip('0').rstrip('.')
     except Exception:
-        logger.error('[FlyingDamage] cannot import VehicleMarkerPlugin', exc_info=True)
-        return
+        return '0'
 
-    oldStart = VehicleMarkerPlugin.start
-    oldStop = VehicleMarkerPlugin.stop
 
-    def newStart(self, *args, **kwargs):
-        result = oldStart(self, *args, **kwargs)
+def _screen_size():
+    try:
+        sw, sh = GUI.screenResolution()[:2]
+        sw = float(sw)
+        sh = float(sh)
+        if sw <= 0.0 or sh <= 0.0:
+            return 1920.0, 1080.0
+        return sw, sh
+    except Exception:
+        return 1920.0, 1080.0
+
+
+def _norm_xy(x, y):
+    sw, sh = _screen_size()
+    try:
+        nx = float(x) / sw
+        ny = float(y) / sh
+    except Exception:
+        nx, ny = 0.5, 0.5
+    nx = max(-0.50, min(1.50, nx))
+    ny = max(-0.50, min(1.50, ny))
+    return nx, ny, sw, sh
+
+
+def _queue_record(record):
+    try:
+        _damageQueue.append(record)
+        if len(_damageQueue) > _MAX_QUEUE:
+            del _damageQueue[0:len(_damageQueue) - _MAX_QUEUE]
+    except Exception:
+        logger.error('[FlyingDamage] queue append failed', exc_info=True)
+
+
+class _FlyingDamageMeta(BaseDAAPIModule):
+
+    def py_log(self, msg):
+        logger.info('[FlyingDamage] %s', msg)
+
+    def py_pullDamageText(self):
         try:
-            _markerParent[0] = self._parentObj
-            _markerPlugin[0] = self
-            logger.info('[FlyingDamage] marker layer captured: %s markers=%s',
-                        _markerParent[0], len(getattr(self, '_markers', {})))
-            _logCanvasShape()
+            if not _damageQueue:
+                return ''
+            data = '\n'.join(_damageQueue)
+            del _damageQueue[:]
+            if _pullLog[0] < 30:
+                _pullLog[0] += 1
+                logger.info('[FlyingDamage] AS3 pulled damage queue: %s', data)
+            return data
         except Exception:
-            logger.error('[FlyingDamage] marker layer capture failed', exc_info=True)
-        return result
+            logger.error('[FlyingDamage] py_pullDamageText failed', exc_info=True)
+            return ''
 
-    def newStop(self, *args, **kwargs):
+    def py_getScreenPos(self, vehicleID, riseMeters=0.0):
         try:
-            if _markerPlugin[0] is self:
-                _cancelRestores()
-                _markerParent[0] = None
-                _markerPlugin[0] = None
-                _canvasLog[0] = False
-                logger.info('[FlyingDamage] marker layer released')
+            from .hooks import projectVehicleScreen
+            pos = projectVehicleScreen(int(vehicleID), float(riseMeters))
+            if pos and pos.get('ok'):
+                nx, ny, _sw, _sh = _norm_xy(pos.get('x', 0.0), pos.get('y', 0.0))
+                pos['x'] = nx
+                pos['y'] = ny
+                pos['normalized'] = True
+            return pos
         except Exception:
-            logger.error('[FlyingDamage] marker layer release failed', exc_info=True)
-        return oldStop(self, *args, **kwargs)
+            return {'x': 0.5, 'y': 0.5, 'ok': False, 'normalized': True}
 
-    VehicleMarkerPlugin.start = newStart
-    VehicleMarkerPlugin.stop = newStop
-    _markerHookInstalled[0] = True
-    logger.info('[FlyingDamage] VehicleMarkerPlugin hook installed')
-
-
-def _cancelRestores():
-    for cbid in list(_restoreCallbacks.values()):
+    def py_projectWorld(self, x, y, z):
         try:
-            BigWorld.cancelCallback(cbid)
+            from .hooks import projectWorldPoint
+            pos = projectWorldPoint(float(x), float(y), float(z))
+            if pos and pos.get('ok'):
+                nx, ny, _sw, _sh = _norm_xy(pos.get('x', 0.0), pos.get('y', 0.0))
+                pos['x'] = nx
+                pos['y'] = ny
+                pos['normalized'] = True
+            return pos
         except Exception:
-            pass
-    _restoreCallbacks.clear()
+            return {'x': 0.5, 'y': 0.5, 'ok': False, 'normalized': True}
+
+    def as_populate(self):
+        if self._isDAAPIInited():
+            self.flashObject.as_populate()
+
+    def as_clear(self):
+        if self._isDAAPIInited():
+            self.flashObject.as_clear()
 
 
-def _getExistingMarker(vehicleID):
-    try:
-        plugin = _markerPlugin[0]
-        if plugin is None:
-            return None
-        return getattr(plugin, '_markers', {}).get(int(vehicleID))
-    except Exception:
-        return None
-
-
-def _getExistingMarkerID(vehicleID):
-    marker = _getExistingMarker(vehicleID)
-    if marker is None:
-        return None
-    try:
-        return marker.getMarkerID()
-    except Exception:
-        logger.error('[FlyingDamage] get existing marker id failed vid=%s', vehicleID, exc_info=True)
-        return None
-
-
-def _getAnyExistingMarker():
-    try:
-        plugin = _markerPlugin[0]
-        if plugin is None:
-            return None
-        markers = getattr(plugin, '_markers', {})
-        for _vid, marker in markers.iteritems():
-            return marker
-    except Exception:
-        pass
-    return None
-
-
-def _getCanvas():
-    parent = _markerParent[0]
-    if parent is None:
-        return None
-    for name in ('_MarkersManager__canvas', '_VehicleMarkersManager__canvas', '__canvas'):
-        try:
-            canvas = getattr(parent, name, None)
-            if canvas is not None:
-                return canvas
-        except Exception:
-            pass
-    return None
-
-
-def _logCanvasShape():
-    if _canvasLog[0]:
-        return
-    _canvasLog[0] = True
-    parent = _markerParent[0]
-    canvas = _getCanvas()
-    try:
-        logger.info('[FlyingDamage] marker parent shape: hasPublicText=%s hasPublicDistance=%s canvas=%s hasCanvasText=%s hasCanvasDistance=%s hasCanvasInvoke=%s',
-                    hasattr(parent, 'setMarkerTextLabelEnabled'),
-                    hasattr(parent, 'setMarkerCustomDistanceStr'),
-                    canvas,
-                    hasattr(canvas, 'markerSetTextLabelEnabled') if canvas is not None else False,
-                    hasattr(canvas, 'markerSetCustomDistanceStr') if canvas is not None else False,
-                    hasattr(canvas, 'markerInvoke') if canvas is not None else False)
-    except Exception:
-        pass
-
-
-def _invokeMarker(markerID, function, *args):
-    parent = _markerParent[0]
-    try:
-        if parent is not None and hasattr(parent, 'invokeMarker'):
-            parent.invokeMarker(markerID, function, *args)
-            return True
-    except Exception:
-        pass
-    canvas = _getCanvas()
-    try:
-        if canvas is not None and hasattr(canvas, 'markerInvoke'):
-            signature = (function,) + args
-            canvas.markerInvoke(markerID, signature)
-            return True
-    except Exception:
-        logger.info('[FlyingDamage] canvas.markerInvoke failed markerID=%s fn=%s', markerID, function, exc_info=True)
-    return False
-
-
-def _safeHealth(marker, fallbackDamage=0):
-    try:
-        h = int(marker.getHealth())
-        if h > 0:
-            return h
-    except Exception:
-        pass
-    try:
-        ent = marker.getVehicleEntity()
-        if ent is not None:
-            h = int(getattr(ent, 'health', 0))
-            if h > 0:
-                return h
-    except Exception:
-        pass
-    try:
-        return max(int(fallbackDamage), 1)
-    except Exception:
-        return 1
-
-
-class _ExistingMarkerRenderer(object):
+class FlyingDamageFlash(ExternalFlashComponent, _FlyingDamageMeta):
 
     def __init__(self):
-        self.enabled = False
-
-    def start(self):
-        self.enabled = True
-        logger.info('[FlyingDamage] existing-marker renderer started')
-
-    def stop(self):
-        self.enabled = False
-        _cancelRestores()
-        logger.info('[FlyingDamage] existing-marker renderer stopped')
-
-    def showOnVehicle(self, vehicleID, damage, colorRGB, fontSize, alpha, lifeTime):
-        if not self.enabled:
-            return False
-        if _markerPlugin[0] is None:
-            logger.info('[FlyingDamage] marker plugin not ready; cannot show d=%s vid=%s', int(damage), vehicleID)
-            return False
-
-        marker = _getExistingMarker(vehicleID)
-        if marker is None:
-            logger.info('[FlyingDamage] existing marker not found vid=%s d=%s', vehicleID, int(damage))
-            return False
-        markerID = marker.getMarkerID()
-
+        super(FlyingDamageFlash, self).__init__(
+            ExternalFlashSettings(_LINKAGE, _SWF_NAME, 'root', None))
+        self.createExternalComponent()
+        self._configureApp()
         try:
-            realHealth = _safeHealth(marker, damage)
-            fakeHealth = max(0, realHealth - max(1, int(damage)))
-            # updateHealth(newHealth, damageType, attackReason). Exact strings are
-            # passed through to AS3. If the marker supports health-hit animation,
-            # this must be visible because it is the native vehicle marker path.
-            hitOK = _invokeMarker(markerID, 'updateHealth', fakeHealth, '', 'shot')
-            updOK = _invokeMarker(markerID, 'update')
-
-            if _pushLog[0] < 120:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] EXISTING_MARKER hit d=%s vid=%s markerID=%s hp=%s fakeHp=%s hitOK=%s updOK=%s',
-                            int(damage), vehicleID, markerID, realHealth, fakeHealth, hitOK, updOK)
-
-            self._scheduleRestore(markerID, realHealth, max(0.5, float(lifeTime)))
-            return True
+            self.flashObject.py_log = self.py_log
+            self.flashObject.py_pullDamageText = self.py_pullDamageText
+            self.flashObject.py_getScreenPos = self.py_getScreenPos
+            self.flashObject.py_projectWorld = self.py_projectWorld
         except Exception:
-            logger.error('[FlyingDamage] existing marker hit failed vid=%s markerID=%s',
-                         vehicleID, markerID, exc_info=True)
-            return False
+            logger.error('[FlyingDamage] wiring callbacks failed', exc_info=True)
+        self.as_populate()
+        logger.info('[FlyingDamage] flash component created')
 
-    def showDebug(self):
-        if _markerPlugin[0] is None:
-            logger.info('[FlyingDamage] existing-marker debug: plugin not ready')
-            return False
-        marker = _getAnyExistingMarker()
-        if marker is None:
-            logger.info('[FlyingDamage] existing-marker debug: no existing markers yet')
-            return False
+    def forceTopDepth(self):
         try:
-            markerID = marker.getMarkerID()
-            realHealth = _safeHealth(marker, 9999)
-            fakeHealth = max(0, realHealth - 777)
-            hitOK = _invokeMarker(markerID, 'updateHealth', fakeHealth, '', 'shot')
-            updOK = _invokeMarker(markerID, 'update')
-            logger.info('[FlyingDamage] EXISTING_MARKER debug health markerID=%s hp=%s fakeHp=%s hitOK=%s updOK=%s',
-                        markerID, realHealth, fakeHealth, hitOK, updOK)
-            self._scheduleRestore(markerID, realHealth, 5.0)
-            return True
+            self.component.position.z = _HIGH_DEPTH
+            self.component.focus = False
+            self.component.moveFocus = False
+            logger.info('[FlyingDamage] flash depth forced to %.1f', self.component.position.z)
         except Exception:
-            logger.error('[FlyingDamage] existing-marker debug health failed', exc_info=True)
-            return False
+            logger.error('[FlyingDamage] force depth failed', exc_info=True)
 
-    def _scheduleRestore(self, markerID, realHealth, lifeTime):
+    def _configureApp(self):
         try:
-            old = _restoreCallbacks.pop(markerID, None)
-            if old is not None:
-                try:
-                    BigWorld.cancelCallback(old)
-                except Exception:
-                    pass
-            _restoreCallbacks[markerID] = BigWorld.callback(lifeTime, lambda: self._restore(markerID, realHealth))
+            self.movie.backgroundAlpha = 0.0
+            self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
+            if InputKeyMode is not None:
+                self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
+            self.forceTopDepth()
         except Exception:
-            logger.error('[FlyingDamage] schedule restore failed markerID=%s', markerID, exc_info=True)
+            logger.error('[FlyingDamage] configureApp partial', exc_info=True)
 
-    def _restore(self, markerID, realHealth):
-        _restoreCallbacks.pop(markerID, None)
-        if _markerPlugin[0] is None:
-            return
+    def close(self):
         try:
-            setOK = _invokeMarker(markerID, 'setHealth', int(realHealth))
-            updOK = _invokeMarker(markerID, 'update')
-            logger.info('[FlyingDamage] EXISTING_MARKER restoreHealth markerID=%s hp=%s setOK=%s updOK=%s',
-                        markerID, realHealth, setOK, updOK)
+            self.as_dispose()
         except Exception:
-            logger.error('[FlyingDamage] existing marker restore health failed markerID=%s', markerID, exc_info=True)
+            pass
+        try:
+            super(FlyingDamageFlash, self).close()
+        except Exception:
+            logger.info('[FlyingDamage] flash close (non-fatal)')
+
+    def as_dispose(self):
+        if self._isDAAPIInited():
+            self.flashObject.as_dispose()
 
 
 class Controller(object):
@@ -281,11 +194,11 @@ class Controller(object):
     def __init__(self):
         self._enabled = True
         self._battleMode = False
-        self._renderer = _ExistingMarkerRenderer()
+        self._flash = None
+        self._depthTicks = 0
 
     def init(self):
-        logger.info('[FlyingDamage] controller.init begin (existing vehicle markers updateHealth)')
-        _installMarkerLayerHook()
+        logger.info('[FlyingDamage] controller.init begin (custom SWF vehicle anchor)')
         try:
             from .settings.config import g_config
             g_config.registerSettings()
@@ -327,23 +240,28 @@ class Controller(object):
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
         _testLog[0] = False
-        logger.info('[FlyingDamage] avatar ready -> existing-marker renderer active')
-        self._renderer.start()
+        self._depthTicks = 0
+        logger.info('[FlyingDamage] avatar ready -> delayed custom SWF create')
+        BigWorld.callback(2.0, self._createFlashDelayed)
+        BigWorld.callback(3.5, self._installSuppressionSafe)
+
+    def _createFlashDelayed(self):
+        if not self._battleMode:
+            return
+        logger.info('[FlyingDamage] delayed create custom SWF now')
+        self._createFlash()
+        self._keepDepthOnTop()
+
+    def _keepDepthOnTop(self):
+        if not self._battleMode or self._flash is None:
+            return
+        self._depthTicks += 1
         try:
-            from .hooks import setView
-            setView(self)
+            self._flash.forceTopDepth()
         except Exception:
             pass
-        BigWorld.callback(2.0, self._debugTestDamage)
-        BigWorld.callback(5.0, self._debugTestDamage)
-        BigWorld.callback(8.0, self._debugTestDamage)
-        BigWorld.callback(3.0, self._installSuppressionSafe)
-
-    def _debugTestDamage(self):
-        if not self._battleMode or _testLog[0]:
-            return
-        if self._renderer.showDebug():
-            _testLog[0] = True
+        if self._depthTicks < 12:
+            BigWorld.callback(1.0, self._keepDepthOnTop)
 
     def _installSuppressionSafe(self):
         try:
@@ -354,13 +272,27 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamage] installSuppression failed', exc_info=True)
 
+    def _createFlash(self):
+        if self._flash is not None:
+            return
+        try:
+            self._flash = FlyingDamageFlash()
+            from .hooks import setView
+            setView(self)
+        except Exception:
+            logger.error('[FlyingDamage] createFlash failed', exc_info=True)
+            self._flash = None
+
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FlyingDamage] battle leave')
         self._battleMode = False
-        self._renderer.stop()
+        self._destroyFlash()
         try:
-            from .hooks import setView, resetState
-            setView(None)
+            del _damageQueue[:]
+        except Exception:
+            pass
+        try:
+            from .hooks import resetState
             resetState()
         except Exception:
             pass
@@ -370,21 +302,69 @@ class Controller(object):
         except Exception:
             pass
 
+    def _destroyFlash(self):
+        if self._flash is not None:
+            try:
+                self._flash.close()
+            except Exception:
+                pass
+            self._flash = None
+        try:
+            from .hooks import setView
+            setView(None)
+        except Exception:
+            pass
+
+    def showDamageNormalized(self, nx, ny, damage, colorRGB, fontSize, alpha,
+                             riseNormalized=0.055, lifeTime=1.6):
+        try:
+            rec = 'N|%s|%s|%d|%d|%d|%s|%s|%s' % (
+                _fmt_float(nx), _fmt_float(ny), int(damage), int(colorRGB), int(fontSize),
+                _fmt_float(alpha), _fmt_float(riseNormalized), _fmt_float(lifeTime))
+            _queue_record(rec)
+            if _pushLog[0] < 30:
+                _pushLog[0] += 1
+                logger.info('[FlyingDamage] queued normalized d=%s nx=%.4f ny=%.4f',
+                            int(damage), float(nx), float(ny))
+        except Exception:
+            logger.error('[FlyingDamage] queue normalized failed', exc_info=True)
+
     def showDamageAt(self, x, y, damage, colorRGB, fontSize, alpha, risePixels=55.0, lifeTime=1.6):
-        if _pushLog[0] < 10:
-            _pushLog[0] += 1
-            logger.info('[FlyingDamage] screen damage ignored by existing-marker renderer d=%s', int(damage))
+        try:
+            nx, ny, sw, sh = _norm_xy(x, y)
+            riseNorm = max(0.01, min(0.20, float(risePixels) / sh))
+            self.showDamageNormalized(nx, ny, damage, colorRGB, fontSize, alpha, riseNorm, lifeTime)
+            logger.info('[FlyingDamage] screen->normalized d=%s screen=(%.1f,%.1f) res=(%.0f,%.0f) norm=(%.4f,%.4f)',
+                        int(damage), float(x), float(y), sw, sh, nx, ny)
+        except Exception:
+            logger.error('[FlyingDamage] queue screen failed', exc_info=True)
 
     def showDamageWorld(self, wx, wy, wz, fallbackX, fallbackY, damage, colorRGB,
                         fontSize, alpha, riseMeters=1.35, lifeTime=1.6, vehicleID=None):
-        if not self._battleMode:
-            return
-        if vehicleID is None:
-            if _pushLog[0] < 10:
-                _pushLog[0] += 1
-                logger.info('[FlyingDamage] missing vehicleID for existing-marker damage d=%s', int(damage))
-            return
-        self._renderer.showOnVehicle(vehicleID, damage, colorRGB, fontSize, alpha, lifeTime)
+        try:
+            nx, ny, sw, sh = _norm_xy(fallbackX, fallbackY)
+            if vehicleID is not None:
+                rec = 'V|%d|%s|%s|%d|%d|%d|%s|%s|%s' % (
+                    int(vehicleID), _fmt_float(nx), _fmt_float(ny),
+                    int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
+                    _fmt_float(riseMeters), _fmt_float(lifeTime))
+                _queue_record(rec)
+                if _pushLog[0] < 40:
+                    _pushLog[0] += 1
+                    logger.info('[FlyingDamage] queued vehicle anchored d=%s vid=%s norm=(%.4f,%.4f) rise=%.2f',
+                                int(damage), int(vehicleID), nx, ny, float(riseMeters))
+            else:
+                rec = 'W|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s' % (
+                    _fmt_float(wx), _fmt_float(wy), _fmt_float(wz),
+                    _fmt_float(nx), _fmt_float(ny),
+                    int(damage), int(colorRGB), int(fontSize), _fmt_float(alpha),
+                    _fmt_float(riseMeters), _fmt_float(lifeTime))
+                _queue_record(rec)
+                if _pushLog[0] < 40:
+                    _pushLog[0] += 1
+                    logger.info('[FlyingDamage] queued world anchored d=%s norm=(%.4f,%.4f)', int(damage), nx, ny)
+        except Exception:
+            logger.error('[FlyingDamage] queue world/vehicle failed', exc_info=True)
 
     def showDamage(self, x, y, damage, colorRGB, fontSize, alpha):
         self.showDamageAt(x, y, damage, colorRGB, fontSize, alpha)
