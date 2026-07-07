@@ -70,8 +70,11 @@ package com.flyingdamage
                         for (var i:int = 0; i < list.length; i++)
                         {
                             var d:Object = list[i];
-                            log("recv vid=" + d.vid + " dmg=" + d.dmg);
-                            _layer.showDamage(String(d.vid), int(d.dmg), uint(d.color), int(d.size), Number(d.alpha));
+                            var hasStart:Boolean = d.hasStart === true;
+                            var sx:Number = hasStart ? Number(d.x) : 0;
+                            var sy:Number = hasStart ? Number(d.y) : 0;
+                            log("recv vid=" + d.vid + " dmg=" + d.dmg + " hasStart=" + hasStart);
+                            _layer.showDamage(String(d.vid), int(d.dmg), uint(d.color), int(d.size), Number(d.alpha), sx, sy, hasStart);
                         }
                     }
                 }
