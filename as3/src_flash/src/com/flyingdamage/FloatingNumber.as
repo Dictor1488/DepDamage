@@ -22,7 +22,7 @@ package com.flyingdamage
         private static const LIFETIME:Number = 1.6;
         private static const RISE_PIXELS:Number = 42.0;
         private static const FADE_START:Number = 0.55;
-        private static const ANCHOR_OFFSET_Y:Number = -20.0;
+        private static const ANCHOR_OFFSET_Y:Number = -82.0;
 
         public function FloatingNumber(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, baseAlpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false)
         {
