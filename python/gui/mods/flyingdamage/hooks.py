@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # hooks.py  --  Python 2.7
-# Damage from health marker hook. Feed Gameface renderer with vehicle id;
-# controller projects vehicle marker to screen pixels and creates popup windows.
+# Damage from health marker hook. Feed AS3 renderer with vehicle id.
+# AS3 follows the vehicle marker position and applies marker-local damage offsets.
 
 import logging
 
@@ -15,7 +15,7 @@ from .settings.config import g_config
 logger = logging.getLogger(__name__)
 
 _ANCHOR_UP = 4.5
-_MARKER_Y_OFFSET = -18.0
+_MARKER_Y_OFFSET = 0.0
 _PLAYER_DAMAGE_COLOR = 0xFFDC3C
 _MERGE_WINDOW = 0.09
 _ctrlRef = [None]
@@ -163,7 +163,7 @@ def _feedFlush(vid):
     color = _PLAYER_DAMAGE_COLOR if myDamage else g_config.colorForTeam(isEnemy)
     if _feedLog[0] < 80:
         _feedLog[0] += 1
-        logger.info('[FlyingDamageGF] feedFlush -> Gameface showDamage vid=%s dmg=%d mine=%s color=0x%06X', vid, damage, myDamage, color)
+        logger.info('[FlyingDamageGF] feedFlush -> AS3 marker-anchored showDamage vid=%s dmg=%d mine=%s color=0x%06X', vid, damage, myDamage, color)
     ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0)
 
 
@@ -186,7 +186,7 @@ def projectVehicleScreen(vid, quiet=False):
             return {'x': 0.0, 'y': 0.0, 'ok': False}
         if not quiet and _projCallLog[0] < 100:
             _projCallLog[0] += 1
-            logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s source=%s', vid, float(sx), float(sy), visible, source)
+            logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s source=%s markerYOffset=%.1f', vid, float(sx), float(sy), visible, source, _MARKER_Y_OFFSET)
         if not visible:
             return {'x': float(sx), 'y': float(sy), 'ok': False}
         return {'x': float(sx), 'y': float(sy), 'ok': True}
