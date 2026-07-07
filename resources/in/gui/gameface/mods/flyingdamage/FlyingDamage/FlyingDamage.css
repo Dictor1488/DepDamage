@@ -13,8 +13,8 @@ html, body {
   height: 120px;
   overflow: visible;
   pointer-events: none;
-  background: rgba(255, 220, 0, 0.12);
-  border: 2px solid rgba(255, 220, 0, 0.45);
+  background: transparent;
+  border: none;
 }
 .fd-damage {
   position: absolute;
