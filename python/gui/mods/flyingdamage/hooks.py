@@ -183,6 +183,8 @@ def projectVehicleScreen(vid):
         if _projCallLog[0] < 100:
             _projCallLog[0] += 1
             logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s source=%s', vid, float(sx), float(sy), visible, source)
+        if not visible:
+            return {'x': float(sx), 'y': float(sy), 'ok': False}
         return {'x': float(sx), 'y': float(sy), 'ok': True}
     except Exception:
         logger.error('[FlyingDamageGF] projectVehicleScreen failed vid=%s', vid, exc_info=True)
