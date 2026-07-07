@@ -13,28 +13,23 @@ html, body {
   height: 120px;
   overflow: visible;
   pointer-events: none;
+  background: transparent;
 }
-#fd-hud {
-  display: block;
-  width: 220px;
-  height: 120px;
-  overflow: visible;
-  pointer-events: none;
-}
-.fd-damage-main {
+.fd-damage {
+  position: absolute;
+  left: 110px;
+  top: 66px;
+  transform: translate(-50%, -50%);
   font-family: Arial, sans-serif;
   font-weight: 900;
-  text-anchor: middle;
-  dominant-baseline: central;
-  stroke: #2a0000;
-  stroke-width: 4px;
-  stroke-linejoin: round;
-}
-.fd-damage-shadow {
-  font-family: Arial, sans-serif;
-  font-weight: 900;
-  text-anchor: middle;
-  dominant-baseline: central;
-  fill: #000000;
-  opacity: 0.65;
+  line-height: 1;
+  white-space: nowrap;
+  color: #ff3838;
+  text-shadow:
+    -2px -2px 0 #2a0000,
+     2px -2px 0 #2a0000,
+    -2px  2px 0 #2a0000,
+     2px  2px 0 #2a0000,
+     0 0 6px #000000;
+  will-change: transform, opacity;
 }
