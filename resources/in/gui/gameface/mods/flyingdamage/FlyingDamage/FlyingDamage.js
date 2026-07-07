@@ -1,9 +1,7 @@
 (function () {
     'use strict';
 
-    var NS = 'http://www.w3.org/2000/svg';
     var root = document.getElementById('fd-root');
-    var hud = document.getElementById('fd-hud');
     var lastPayload = '';
     var started = false;
 
@@ -25,34 +23,14 @@
         return '#' + s;
     }
 
-    function svgEl(name, attrs, parent) {
-        var e = document.createElementNS(NS, name);
-        if (attrs) {
-            for (var k in attrs) {
-                if (attrs.hasOwnProperty(k)) e.setAttribute(k, attrs[k]);
-            }
-        }
-        if (parent) parent.appendChild(e);
-        return e;
-    }
-
-    function ensureHud() {
+    function ensureRoot() {
         if (!root) root = document.getElementById('fd-root');
-        if (!hud) hud = document.getElementById('fd-hud');
         if (!root && document.body) {
             root = document.createElement('div');
             root.id = 'fd-root';
             document.body.appendChild(root);
         }
-        if (!hud && root) {
-            hud = svgEl('svg', {
-                id: 'fd-hud',
-                width: '220',
-                height: '120',
-                viewBox: '0 0 220 120'
-            }, root);
-        }
-        return !!hud;
+        return !!root;
     }
 
     function ready() {
@@ -65,36 +43,26 @@
     }
 
     function addDamage(ev) {
-        if (!ensureHud() || !ev) return;
+        if (!ensureRoot() || !ev) return;
 
         var x = num(ev.x, 110);
         var y = num(ev.y, 66);
         var textValue = String(Math.round(num(ev.dmg, 0)));
         var size = Math.max(24, num(ev.size, 38));
         var life = Math.max(0.8, num(ev.life, 1.6));
-        var color = colorFromInt(ev.color);
         var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
 
-        var g = svgEl('g', { transform: 'translate(' + x + ' ' + y + ')' }, hud);
-        var shadow = svgEl('text', {
-            'class': 'fd-damage-shadow',
-            x: '3',
-            y: '3',
-            'font-size': String(size)
-        }, g);
-        shadow.textContent = textValue;
+        var el = document.createElement('div');
+        el.className = 'fd-damage';
+        el.textContent = textValue;
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.color = colorFromInt(ev.color);
+        el.style.fontSize = size + 'px';
+        el.style.opacity = alpha;
+        root.appendChild(el);
 
-        var main = svgEl('text', {
-            'class': 'fd-damage-main',
-            x: '0',
-            y: '0',
-            fill: color,
-            'font-size': String(size),
-            opacity: String(alpha)
-        }, g);
-        main.textContent = textValue;
-
-        log('draw-popup-svg dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight);
+        log('draw-popup-html dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight);
 
         var start = Date.now();
         function anim() {
@@ -102,11 +70,10 @@
             var dy = -58 * t;
             var sc = 1 + 0.08 * (1 - Math.abs(t * 2 - 1));
             var op = t < 0.72 ? alpha : Math.max(0, alpha * (1 - (t - 0.72) / 0.28));
-            g.setAttribute('transform', 'translate(' + x + ' ' + (y + dy) + ') scale(' + sc + ')');
-            main.setAttribute('opacity', String(op));
-            shadow.setAttribute('opacity', String(op * 0.65));
+            el.style.transform = 'translate(-50%, -50%) translateY(' + dy + 'px) scale(' + sc + ')';
+            el.style.opacity = op;
             if (t < 1) window.requestAnimationFrame(anim);
-            else if (g && g.parentNode) g.parentNode.removeChild(g);
+            else if (el && el.parentNode) el.parentNode.removeChild(el);
         }
         window.requestAnimationFrame(anim);
     }
@@ -145,8 +112,8 @@
     function initialize() {
         if (started) return;
         started = true;
-        ensureHud();
-        log('initialize-popup-svg view=' + window.innerWidth + 'x' + window.innerHeight + ' hud=' + !!hud);
+        ensureRoot();
+        log('initialize-popup-html view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
         ready();
         readPayload();
         window.setTimeout(readPayload, 50);
