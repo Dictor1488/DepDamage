@@ -6,11 +6,13 @@ package com.flyingdamage
     {
         private var _app:FlyingDamageApp;
         private var _items:Vector.<FloatingNumber>;
+        private var _splashes:Vector.<HpSplash>;
 
         public function DamageLayer(app:FlyingDamageApp)
         {
             _app = app;
             _items = new Vector.<FloatingNumber>();
+            _splashes = new Vector.<HpSplash>();
             mouseEnabled = false;
             mouseChildren = false;
         }
@@ -19,6 +21,11 @@ package com.flyingdamage
         {
             if (damage <= 0)
                 return;
+
+            var splash:HpSplash = new HpSplash(vehicleID, damage, colorRGB, startX, startY, hasStart);
+            addChild(splash);
+            _splashes.push(splash);
+
             var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha, startX, startY, hasStart);
             addChild(fn);
             _items.push(fn);
@@ -33,6 +40,14 @@ package com.flyingdamage
                 fn.dispose();
             }
             _items = new Vector.<FloatingNumber>();
+
+            for each (var sp:HpSplash in _splashes)
+            {
+                if (sp.parent != null)
+                    sp.parent.removeChild(sp);
+                sp.dispose();
+            }
+            _splashes = new Vector.<HpSplash>();
         }
 
         public function tick():int
@@ -51,7 +66,23 @@ package com.flyingdamage
                 }
             }
             _items = survivors;
-            return _items.length;
+
+            var splashSurvivors:Vector.<HpSplash> = new Vector.<HpSplash>();
+            for each (var sp:HpSplash in _splashes)
+            {
+                var spos:Object = _app.getScreenPos(sp.vehicleID);
+                if (sp.update(spos))
+                    splashSurvivors.push(sp);
+                else
+                {
+                    if (sp.parent != null)
+                        sp.parent.removeChild(sp);
+                    sp.dispose();
+                }
+            }
+            _splashes = splashSurvivors;
+
+            return _items.length + _splashes.length;
         }
     }
 }
