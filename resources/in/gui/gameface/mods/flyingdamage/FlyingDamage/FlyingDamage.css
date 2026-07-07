@@ -1,6 +1,6 @@
 html, body {
-  width: 220px;
-  height: 120px;
+  width: 120px;
+  height: 74px;
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -9,8 +9,8 @@ html, body {
 * { box-sizing: border-box; }
 #fd-root {
   position: relative;
-  width: 220px;
-  height: 120px;
+  width: 120px;
+  height: 74px;
   overflow: visible;
   pointer-events: none;
   background: transparent;
@@ -18,43 +18,43 @@ html, body {
 }
 .fd-damage {
   position: absolute;
-  left: 110px;
-  top: 64px;
-  width: 180px;
-  height: 86px;
+  left: 60px;
+  top: 37px;
+  width: 96px;
+  height: 48px;
   transform: translate(-50%, -50%);
   will-change: transform, opacity;
 }
 .fd-digit {
   position: absolute;
-  top: 8px;
-  width: 34px;
-  height: 62px;
+  top: 5px;
+  width: 20px;
+  height: 38px;
 }
 .fd-seg {
   position: absolute;
   background: transparent;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 .fd-seg.on {
   background: #ff3838;
   box-shadow:
-    0 0 0 2px #2a0000,
-    0 0 8px #000000;
+    0 0 0 1px #2a0000,
+    0 0 4px #000000;
 }
 .fd-a, .fd-d, .fd-g {
-  left: 7px;
-  width: 20px;
-  height: 7px;
+  left: 4px;
+  width: 12px;
+  height: 4px;
 }
 .fd-a { top: 0; }
-.fd-g { top: 27px; }
-.fd-d { top: 55px; }
+.fd-g { top: 17px; }
+.fd-d { top: 34px; }
 .fd-b, .fd-c, .fd-e, .fd-f {
-  width: 7px;
-  height: 24px;
+  width: 4px;
+  height: 15px;
 }
-.fd-b { left: 27px; top: 5px; }
-.fd-c { left: 27px; top: 34px; }
-.fd-e { left: 0; top: 34px; }
-.fd-f { left: 0; top: 5px; }
+.fd-b { left: 16px; top: 3px; }
+.fd-c { left: 16px; top: 20px; }
+.fd-e { left: 0; top: 20px; }
+.fd-f { left: 0; top: 3px; }
