@@ -133,6 +133,12 @@ class Controller(object):
         if self._logN < 80:
             self._logN += 1
             logger.info('[FD_AS3] queued vid=%s dmg=%s color=0x%06X q=%s', int(vehicleID), int(damage), int(colorRGB) & 0xFFFFFF, len(state.queue))
+        try:
+            self._flash.as_populate()
+            if self._logN < 80:
+                logger.info('[FD_AS3] pushed as_populate after queue q=%s', len(state.queue))
+        except Exception:
+            logger.error('[FD_AS3] push as_populate failed', exc_info=True)
 
 
 g_controller = Controller()
