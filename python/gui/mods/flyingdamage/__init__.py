@@ -15,9 +15,10 @@ logger = logging.getLogger(__name__)
 RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
 POPUP_W = 120
 POPUP_H = 74
-POPUP_LIFE = 2.4
-POPUP_DESTROY_DELAY = 3.4
-POPUP_TRACK_INTERVAL = 0.033
+POPUP_LIFE = 1.8
+POPUP_DESTROY_DELAY = 2.4
+POPUP_TRACK_INTERVAL = 0.12
+MAX_ACTIVE_POPUPS = 5
 
 _OPENWG_OK = False
 _OPENWG_ERR = None
@@ -124,7 +125,7 @@ if _OPENWG_OK:
             self._model = model
 
         def load(self):
-            if self._destroyed:
+            if self._destroyed or not self._owner._battleMode:
                 return
             self._token += 1
             token = self._token
@@ -134,14 +135,14 @@ if _OPENWG_OK:
                 self._load(token)
 
         def _load(self, token, retry=0):
-            if token != self._token or self._destroyed:
+            if token != self._token or self._destroyed or not self._owner._battleMode:
                 return
             try:
                 parent = dependency.instance(IGuiLoader).windowsManager.getMainWindow()
             except Exception:
                 parent = None
             if parent is None or getattr(parent, 'proxy', None) is None or parent.windowStatus != WindowStatus.LOADED:
-                if retry < 100:
+                if retry < 40 and self._owner._battleMode:
                     BigWorld.callback(0.1, lambda: self._load(token, retry + 1))
                 return
             try:
@@ -153,7 +154,8 @@ if _OPENWG_OK:
                 self.destroy()
 
         def onReady(self, *args):
-            if self._destroyed:
+            if self._destroyed or not self._owner._battleMode:
+                self.destroy()
                 return
             self._ready = True
             self._updateMarkerPosition()
@@ -163,13 +165,14 @@ if _OPENWG_OK:
             logger.info('[FlyingDamageGF] popup ready tracked vid=%s x=%s y=%s keep=%.2f', self._vehicleID, self._x, self._y, POPUP_DESTROY_DELAY)
 
         def _scheduleTrack(self):
-            if self._destroyed or not self._ready:
+            if self._destroyed or not self._ready or not self._owner._battleMode:
                 return
             self._trackCb = BigWorld.callback(POPUP_TRACK_INTERVAL, self._track)
 
         def _track(self):
             self._trackCb = None
-            if self._destroyed or not self._ready:
+            if self._destroyed or not self._ready or not self._owner._battleMode:
+                self.destroy()
                 return
             self._updateMarkerPosition()
             self.move()
@@ -178,13 +181,13 @@ if _OPENWG_OK:
         def _updateMarkerPosition(self):
             try:
                 from .hooks import projectVehicleScreen
-                pos = projectVehicleScreen(self._vehicleID)
+                pos = projectVehicleScreen(self._vehicleID, quiet=True)
             except Exception:
                 pos = None
             if pos and pos.get('ok'):
                 self._x = int(round(float(pos.get('x', self._x))))
                 self._y = int(round(float(pos.get('y', self._y))))
-                if self._trackLog < 3:
+                if self._trackLog < 2:
                     self._trackLog += 1
                     logger.info('[FlyingDamageGF] popup track vid=%s x=%s y=%s', self._vehicleID, self._x, self._y)
 
@@ -282,6 +285,7 @@ class Controller(object):
             g_playerEvents.onAvatarBecomeNonPlayer -= self._onBattleLeave
         except Exception:
             pass
+        self._battleMode = False
         self._destroyPopups()
         try:
             from .utils import restore_overrides
@@ -308,6 +312,8 @@ class Controller(object):
             pass
 
     def _installSuppressionSafe(self):
+        if not self._battleMode:
+            return
         try:
             from .suppress import installSuppression, setFeed
             from .hooks import showDamageForVehicle
@@ -335,6 +341,14 @@ class Controller(object):
         except ValueError:
             pass
 
+    def _trimPopups(self):
+        while len(self._popups) >= MAX_ACTIVE_POPUPS:
+            popup = self._popups[0]
+            try:
+                popup.destroy()
+            except Exception:
+                break
+
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FlyingDamageGF] battle leave')
         self._battleMode = False
@@ -351,7 +365,7 @@ class Controller(object):
             pass
 
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
-        if damage <= 0:
+        if damage <= 0 or not self._battleMode:
             return
         if not _OPENWG_OK or _DamagePopup is None:
             if self._pushLog < 20:
@@ -376,6 +390,7 @@ class Controller(object):
         except Exception:
             sw, sh = 1920, 1080
 
+        self._trimPopups()
         self._seq += 1
         ev = {
             'id': self._seq,
@@ -395,7 +410,7 @@ class Controller(object):
         self._popups.append(popup)
         popup.load()
 
-        if self._pushLog < 160:
+        if self._pushLog < 120:
             self._pushLog += 1
             logger.info('[FlyingDamageGF] popup damage id=%s vid=%s dmg=%s screenxy=(%.1f,%.1f) screen=%sx%s active=%s',
                         self._seq, int(vehicleID), int(damage), float(pos.get('x', 0.0)), float(pos.get('y', 0.0)), sw, sh, len(self._popups))
