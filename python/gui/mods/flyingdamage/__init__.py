@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
 # Gameface renderer for FlyingDamage. No AS3/SWF bridge is used.
-# This version follows working UnderPressure Gameface mods: a small WULF
-# WindowLayer.OVERLAY window is created for each damage number and moved to the
-# projected screen coordinate with window.move(x, y). No fullscreen view.
+# Small WULF WindowLayer.OVERLAY popup windows are moved to projected damage coordinates.
 
 import json
 import logging
@@ -17,6 +15,8 @@ logger = logging.getLogger(__name__)
 RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
 POPUP_W = 220
 POPUP_H = 120
+POPUP_LIFE = 3.2
+POPUP_DESTROY_DELAY = 4.8
 
 _OPENWG_OK = False
 _OPENWG_ERR = None
@@ -153,8 +153,8 @@ if _OPENWG_OK:
                 return
             self._ready = True
             self.move()
-            self._cb = BigWorld.callback(max(0.4, self._life + 0.35), self.destroy)
-            logger.info('[FlyingDamageGF] popup ready moved x=%s y=%s', self._x, self._y)
+            self._cb = BigWorld.callback(POPUP_DESTROY_DELAY, self.destroy)
+            logger.info('[FlyingDamageGF] popup ready moved x=%s y=%s keep=%.2f', self._x, self._y, POPUP_DESTROY_DELAY)
 
         def move(self):
             if self._window is None or not self._ready:
@@ -350,7 +350,7 @@ class Controller(object):
             'color': int(colorRGB) & 0xFFFFFF,
             'size': int(fontSize),
             'alpha': float(alpha),
-            'life': 1.6
+            'life': POPUP_LIFE
         }
         payload = {'seq': self._seq, 'events': [ev], 'w': POPUP_W, 'h': POPUP_H}
         popup = _DamagePopup(self, payload, float(pos.get('x', 0.0)), float(pos.get('y', 0.0)), ev['life'])
