@@ -54,16 +54,17 @@
         }
     }
 
-    function makeDigit(ch, color) {
+    function makeDigit(ch, color, left) {
         var digit = document.createElement('div');
         digit.className = 'fd-digit';
+        digit.style.left = left + 'px';
         var on = MAP[ch] || '';
         var names = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
         for (var i = 0; i < names.length; i++) {
             var n = names[i];
             var seg = document.createElement('div');
             seg.className = 'fd-seg fd-' + n + (on.indexOf(n) >= 0 ? ' on' : '');
-            seg.style.backgroundColor = color;
+            if (on.indexOf(n) >= 0) seg.style.backgroundColor = color;
             digit.appendChild(seg);
         }
         return digit;
@@ -78,6 +79,9 @@
         var life = Math.max(2.8, num(ev.life, 3.2));
         var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
         var color = colorFromInt(ev.color);
+        var digitW = 38;
+        var totalW = textValue.length * digitW;
+        var startX = Math.max(0, Math.round((180 - totalW) * 0.5));
 
         var el = document.createElement('div');
         el.className = 'fd-damage';
@@ -85,11 +89,11 @@
         el.style.top = y + 'px';
         el.style.opacity = alpha;
         for (var i = 0; i < textValue.length; i++) {
-            el.appendChild(makeDigit(textValue.charAt(i), color));
+            el.appendChild(makeDigit(textValue.charAt(i), color, startX + i * digitW));
         }
         root.appendChild(el);
 
-        log('draw-popup-seg dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
+        log('draw-popup-seg-abs dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
 
         var start = Date.now();
         function anim() {
@@ -140,7 +144,7 @@
         if (started) return;
         started = true;
         ensureRoot();
-        log('initialize-popup-seg view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
+        log('initialize-popup-seg-abs view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
         ready();
         readPayload();
         window.setTimeout(readPayload, 50);
