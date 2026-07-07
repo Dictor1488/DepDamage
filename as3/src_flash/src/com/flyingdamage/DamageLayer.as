@@ -15,11 +15,11 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number):void
+        public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false):void
         {
             if (damage <= 0)
                 return;
-            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha);
+            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha, startX, startY, hasStart);
             addChild(fn);
             _items.push(fn);
         }
