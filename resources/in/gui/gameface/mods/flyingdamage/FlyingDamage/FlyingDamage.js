@@ -73,15 +73,16 @@
     function addDamage(ev) {
         if (!ensureRoot() || !ev) return;
 
-        var x = num(ev.x, 110);
-        var y = num(ev.y, 66);
+        var x = num(ev.x, 60);
+        var y = num(ev.y, 37);
         var textValue = String(Math.round(num(ev.dmg, 0)));
-        var life = Math.max(2.8, num(ev.life, 3.2));
+        var life = Math.max(1.4, num(ev.life, 2.4));
         var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
         var color = colorFromInt(ev.color);
-        var digitW = 38;
+        var digitW = 24;
+        var boxW = 96;
         var totalW = textValue.length * digitW;
-        var startX = Math.max(0, Math.round((180 - totalW) * 0.5));
+        var startX = Math.max(0, Math.round((boxW - totalW) * 0.5));
 
         var el = document.createElement('div');
         el.className = 'fd-damage';
@@ -93,14 +94,14 @@
         }
         root.appendChild(el);
 
-        log('draw-popup-seg-abs dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
+        log('draw-popup-seg-small dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
 
         var start = Date.now();
         function anim() {
             var t = Math.min(1, (Date.now() - start) / (life * 1000));
-            var dy = -58 * t;
-            var sc = 1 + 0.08 * (1 - Math.abs(t * 2 - 1));
-            var op = t < 0.78 ? alpha : Math.max(0, alpha * (1 - (t - 0.78) / 0.22));
+            var dy = -24 * t;
+            var sc = 1 + 0.04 * (1 - Math.abs(t * 2 - 1));
+            var op = t < 0.76 ? alpha : Math.max(0, alpha * (1 - (t - 0.76) / 0.24));
             el.style.transform = 'translate(-50%, -50%) translateY(' + dy + 'px) scale(' + sc + ')';
             el.style.opacity = op;
             if (t < 1) window.requestAnimationFrame(anim);
@@ -144,7 +145,7 @@
         if (started) return;
         started = true;
         ensureRoot();
-        log('initialize-popup-seg-abs view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
+        log('initialize-popup-seg-small view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
         ready();
         readPayload();
         window.setTimeout(readPayload, 50);
