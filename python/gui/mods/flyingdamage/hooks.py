@@ -167,31 +167,32 @@ def _feedFlush(vid):
     ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0)
 
 
-def projectVehicleScreen(vid):
+def projectVehicleScreen(vid, quiet=False):
     try:
         vehicle = BigWorld.entity(vid)
         if vehicle is None or not _isVehicleUsable(vehicle):
-            if _projCallLog[0] < 30:
+            if not quiet and _projCallLog[0] < 30:
                 _projCallLog[0] += 1
                 logger.info('[FlyingDamageGF] project vid=%s failed vehicle usable=%s', vid, vehicle is not None)
             return {'x': 0.0, 'y': 0.0, 'ok': False}
         res = _project(vehicle)
         if res is None:
-            if _projCallLog[0] < 30:
+            if not quiet and _projCallLog[0] < 30:
                 _projCallLog[0] += 1
                 logger.info('[FlyingDamageGF] project vid=%s failed res=None', vid)
             return {'x': 0.0, 'y': 0.0, 'ok': False}
         sx, sy, visible, source = res
         if sx is None or sy is None:
             return {'x': 0.0, 'y': 0.0, 'ok': False}
-        if _projCallLog[0] < 100:
+        if not quiet and _projCallLog[0] < 100:
             _projCallLog[0] += 1
             logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s source=%s', vid, float(sx), float(sy), visible, source)
         if not visible:
             return {'x': float(sx), 'y': float(sy), 'ok': False}
         return {'x': float(sx), 'y': float(sy), 'ok': True}
     except Exception:
-        logger.error('[FlyingDamageGF] projectVehicleScreen failed vid=%s', vid, exc_info=True)
+        if not quiet:
+            logger.error('[FlyingDamageGF] projectVehicleScreen failed vid=%s', vid, exc_info=True)
         return {'x': 0.0, 'y': 0.0, 'ok': False}
 
 
