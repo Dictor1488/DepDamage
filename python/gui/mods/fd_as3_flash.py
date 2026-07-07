@@ -21,7 +21,7 @@ try:
 except Exception:
     InputKeyMode = None
 
-import fd_as3_state as state
+from gui.mods import fd_as3_state as state
 
 _SWF_NAME = 'FlyingDamageApp.swf'
 _LINKAGE = 'com.flyingdamage.FlyingDamageApp'
