@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '3.9.4'
+        default: '3.9.5'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -80,8 +80,8 @@ jobs:
             -use-network=false `
             -target-player=25.0 `
             -swf-version=36 `
-            -default-size 2560 1369 `
-            -output resources\in\gui\flash\FlyingDamageApp.swf `
+            -default-size=2560,1369 `
+            -output=resources\in\gui\flash\FlyingDamageApp.swf `
             as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as
           if (-not (Test-Path resources\in\gui\flash\FlyingDamageApp.swf)) { throw 'SWF compile failed' }
 
@@ -102,7 +102,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '3.9.4'
+            $version = '3.9.5'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
