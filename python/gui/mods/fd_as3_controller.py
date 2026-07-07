@@ -143,10 +143,36 @@ class Controller(object):
             pass
         return False, 0.0, 0.0
 
+    def _getHpData(self, vehicleID, damage):
+        try:
+            vehicle = BigWorld.entity(int(vehicleID))
+            if vehicle is None:
+                return False, 0, 0, 0
+            cur = int(getattr(vehicle, 'health', 0) or 0)
+            desc = getattr(vehicle, 'typeDescriptor', None)
+            maxHp = int(getattr(desc, 'maxHealth', 0) or 0) if desc is not None else 0
+            if maxHp <= 0:
+                maxHp = int(getattr(vehicle, 'maxHealth', 0) or 0)
+            if maxHp <= 0:
+                return False, 0, 0, 0
+            if cur < 0:
+                cur = 0
+            if cur > maxHp:
+                cur = maxHp
+            before = cur + int(damage)
+            if before > maxHp:
+                before = maxHp
+            if before < cur:
+                before = cur
+            return True, cur, before, maxHp
+        except Exception:
+            return False, 0, 0, 0
+
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         if not self._battleMode or damage <= 0:
             return
         hasStart, sx, sy = self._getStartPoint(vehicleID)
+        hasHp, hpCur, hpBefore, hpMax = self._getHpData(vehicleID, damage)
         item = {
             'vid': str(int(vehicleID)),
             'dmg': int(damage),
@@ -156,11 +182,15 @@ class Controller(object):
             'hasStart': bool(hasStart),
             'x': float(sx),
             'y': float(sy),
+            'hasHp': bool(hasHp),
+            'hpCur': int(hpCur),
+            'hpBefore': int(hpBefore),
+            'hpMax': int(hpMax),
         }
         state.queue.append(item)
         if self._logN < 100:
             self._logN += 1
-            logger.info('[FD_AS3] queued screen vid=%s dmg=%s hasStart=%s xy=(%.1f,%.1f) color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), sx, sy, int(colorRGB) & 0xFFFFFF, len(state.queue))
+            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, int(colorRGB) & 0xFFFFFF, len(state.queue))
         self._createFlash()
 
 
