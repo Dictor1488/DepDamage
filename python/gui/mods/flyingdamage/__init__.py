@@ -13,10 +13,10 @@ from PlayerEvents import g_playerEvents
 logger = logging.getLogger(__name__)
 
 RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
-POPUP_W = 220
-POPUP_H = 120
-POPUP_LIFE = 3.2
-POPUP_DESTROY_DELAY = 4.8
+POPUP_W = 120
+POPUP_H = 74
+POPUP_LIFE = 2.4
+POPUP_DESTROY_DELAY = 3.4
 POPUP_TRACK_INTERVAL = 0.033
 
 _OPENWG_OK = False
@@ -196,7 +196,7 @@ if _OPENWG_OK:
             except Exception:
                 sw, sh = 1920, 1080
             left = max(0, min(int(self._x - POPUP_W * 0.5), int(sw - POPUP_W)))
-            top = max(0, min(int(self._y - POPUP_H * 0.65), int(sh - POPUP_H)))
+            top = max(0, min(int(self._y - POPUP_H * 1.15), int(sh - POPUP_H)))
             try:
                 self._window.move(left, top)
             except Exception:
@@ -382,7 +382,7 @@ class Controller(object):
             'vid': int(vehicleID),
             'dmg': int(damage),
             'x': POPUP_W * 0.5,
-            'y': POPUP_H * 0.55,
+            'y': POPUP_H * 0.50,
             'sw': POPUP_W,
             'sh': POPUP_H,
             'color': int(colorRGB) & 0xFFFFFF,
