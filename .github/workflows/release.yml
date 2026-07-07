@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '3.9.3'
+        default: '3.9.4'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -27,6 +27,7 @@ env:
   MOD_ID: 'com.author.flyingdamage'
   MOD_NAME: 'Flying Damage'
   MOD_DESCRIPTION: 'AS3/Scaleform floating damage numbers above vehicle markers.'
+  FLEX_VERSION: '4.16.1'
 
 jobs:
   build:
@@ -41,13 +42,48 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Set up Java for Flex
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '11'
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install psutil
 
+      - name: Download Flex SDK
+        shell: pwsh
+        run: |
+          $url = "https://archive.apache.org/dist/flex/$env:FLEX_VERSION/binaries/apache-flex-sdk-$env:FLEX_VERSION-bin.zip"
+          Invoke-WebRequest -Uri $url -OutFile flex-sdk.zip -UseBasicParsing -TimeoutSec 300
+          New-Item -ItemType Directory -Force -Path C:\flex-sdk | Out-Null
+          Expand-Archive -Path flex-sdk.zip -DestinationPath C:\flex-sdk-temp -Force
+          $items = Get-ChildItem C:\flex-sdk-temp
+          if ($items.Count -eq 1 -and $items[0].PSIsContainer) {
+            Get-ChildItem $items[0].FullName | Move-Item -Destination C:\flex-sdk -Force
+          } else {
+            Get-ChildItem C:\flex-sdk-temp | Move-Item -Destination C:\flex-sdk -Force
+          }
+
       - name: Decode bundled assets
         run: python tools/decode_assets.py
+
+      - name: Compile AS3 SWF
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path resources\in\gui\flash | Out-Null
+          & C:\flex-sdk\bin\mxmlc.bat `
+            -source-path+=as3\src_flash\src `
+            -static-link-runtime-shared-libraries=true `
+            -use-network=false `
+            -target-player=25.0 `
+            -swf-version=36 `
+            -default-size 2560 1369 `
+            -output resources\in\gui\flash\FlyingDamageApp.swf `
+            as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as
+          if (-not (Test-Path resources\in\gui\flash\FlyingDamageApp.swf)) { throw 'SWF compile failed' }
 
       - name: Install Python 2.7 for pyc compile
         shell: pwsh
@@ -66,7 +102,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '3.9.3'
+            $version = '3.9.4'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
