@@ -13,8 +13,8 @@ html, body {
   height: 120px;
   overflow: visible;
   pointer-events: none;
-  background: rgba(255, 220, 0, 0.16);
-  border: 2px solid rgba(255, 220, 0, 0.55);
+  background: rgba(255, 220, 0, 0.12);
+  border: 2px solid rgba(255, 220, 0, 0.45);
 }
 .fd-damage {
   position: absolute;
@@ -23,26 +23,25 @@ html, body {
   width: 180px;
   height: 86px;
   transform: translate(-50%, -50%);
-  white-space: nowrap;
   will-change: transform, opacity;
 }
 .fd-digit {
-  position: relative;
-  display: inline-block;
+  position: absolute;
+  top: 8px;
   width: 34px;
   height: 62px;
-  margin: 0 2px;
 }
 .fd-seg {
   position: absolute;
-  display: none;
-  background: #ff3838;
+  background: transparent;
   border-radius: 3px;
+}
+.fd-seg.on {
+  background: #ff3838;
   box-shadow:
     0 0 0 2px #2a0000,
     0 0 8px #000000;
 }
-.fd-seg.on { display: block; }
 .fd-a, .fd-d, .fd-g {
   left: 7px;
   width: 20px;
@@ -50,12 +49,12 @@ html, body {
 }
 .fd-a { top: 0; }
 .fd-g { top: 27px; }
-.fd-d { bottom: 0; }
+.fd-d { top: 55px; }
 .fd-b, .fd-c, .fd-e, .fd-f {
   width: 7px;
   height: 24px;
 }
-.fd-b { right: 0; top: 5px; }
-.fd-c { right: 0; bottom: 5px; }
-.fd-e { left: 0; bottom: 5px; }
+.fd-b { left: 27px; top: 5px; }
+.fd-c { left: 27px; top: 34px; }
+.fd-e { left: 0; top: 34px; }
 .fd-f { left: 0; top: 5px; }
