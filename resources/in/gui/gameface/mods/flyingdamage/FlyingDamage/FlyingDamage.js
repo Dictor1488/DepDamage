@@ -4,6 +4,18 @@
     var root = document.getElementById('fd-root');
     var lastPayload = '';
     var started = false;
+    var MAP = {
+        '0': 'abcdef',
+        '1': 'bc',
+        '2': 'abged',
+        '3': 'abgcd',
+        '4': 'fgbc',
+        '5': 'afgcd',
+        '6': 'afgecd',
+        '7': 'abc',
+        '8': 'abcdefg',
+        '9': 'abfgcd'
+    };
 
     function log(msg) {
         try { console.warn('[FlyingDamageGF_JS] ' + msg); } catch (e) {}
@@ -42,27 +54,42 @@
         }
     }
 
+    function makeDigit(ch, color) {
+        var digit = document.createElement('div');
+        digit.className = 'fd-digit';
+        var on = MAP[ch] || '';
+        var names = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+        for (var i = 0; i < names.length; i++) {
+            var n = names[i];
+            var seg = document.createElement('div');
+            seg.className = 'fd-seg fd-' + n + (on.indexOf(n) >= 0 ? ' on' : '');
+            seg.style.backgroundColor = color;
+            digit.appendChild(seg);
+        }
+        return digit;
+    }
+
     function addDamage(ev) {
         if (!ensureRoot() || !ev) return;
 
         var x = num(ev.x, 110);
         var y = num(ev.y, 66);
         var textValue = String(Math.round(num(ev.dmg, 0)));
-        var size = Math.max(24, num(ev.size, 38));
         var life = Math.max(2.8, num(ev.life, 3.2));
         var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
+        var color = colorFromInt(ev.color);
 
         var el = document.createElement('div');
         el.className = 'fd-damage';
-        el.textContent = textValue;
         el.style.left = x + 'px';
         el.style.top = y + 'px';
-        el.style.color = colorFromInt(ev.color);
-        el.style.fontSize = size + 'px';
         el.style.opacity = alpha;
+        for (var i = 0; i < textValue.length; i++) {
+            el.appendChild(makeDigit(textValue.charAt(i), color));
+        }
         root.appendChild(el);
 
-        log('draw-popup-html dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
+        log('draw-popup-seg dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
 
         var start = Date.now();
         function anim() {
@@ -113,7 +140,7 @@
         if (started) return;
         started = true;
         ensureRoot();
-        log('initialize-popup-html view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
+        log('initialize-popup-seg view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
         ready();
         readPayload();
         window.setTimeout(readPayload, 50);
