@@ -4,8 +4,8 @@ import logging
 import BigWorld
 from PlayerEvents import g_playerEvents
 
-import fd_as3_state as state
-from fd_as3_flash import FlyingDamageFlash
+from gui.mods import fd_as3_state as state
+from gui.mods.fd_as3_flash import FlyingDamageFlash
 
 logger = logging.getLogger(__name__)
 
