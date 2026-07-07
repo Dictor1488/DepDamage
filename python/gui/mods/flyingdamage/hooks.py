@@ -15,7 +15,7 @@ from .settings.config import g_config
 logger = logging.getLogger(__name__)
 
 _ANCHOR_UP = 4.5
-_MARKER_Y_OFFSET = 34.0
+_MARKER_Y_OFFSET = -18.0
 _PLAYER_DAMAGE_COLOR = 0xFFDC3C
 _MERGE_WINDOW = 0.09
 _ctrlRef = [None]
