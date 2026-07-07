@@ -73,8 +73,12 @@ package com.flyingdamage
                             var hasStart:Boolean = d.hasStart === true;
                             var sx:Number = hasStart ? Number(d.x) : 0;
                             var sy:Number = hasStart ? Number(d.y) : 0;
-                            log("recv vid=" + d.vid + " dmg=" + d.dmg + " hasStart=" + hasStart);
-                            _layer.showDamage(String(d.vid), int(d.dmg), uint(d.color), int(d.size), Number(d.alpha), sx, sy, hasStart);
+                            var hasHp:Boolean = d.hasHp === true;
+                            var hpCur:int = hasHp ? int(d.hpCur) : 0;
+                            var hpBefore:int = hasHp ? int(d.hpBefore) : 0;
+                            var hpMax:int = hasHp ? int(d.hpMax) : 0;
+                            log("recv vid=" + d.vid + " dmg=" + d.dmg + " hasStart=" + hasStart + " hasHp=" + hasHp);
+                            _layer.showDamage(String(d.vid), int(d.dmg), uint(d.color), int(d.size), Number(d.alpha), sx, sy, hasStart, hasHp, hpCur, hpBefore, hpMax);
                         }
                     }
                 }
