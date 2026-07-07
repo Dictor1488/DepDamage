@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 _ANCHOR_UP = 4.5
 _MARKER_Y_OFFSET = 34.0
+_PLAYER_DAMAGE_COLOR = 0xFFDC3C
 _MERGE_WINDOW = 0.09
 _ctrlRef = [None]
 _pending = {}
@@ -42,6 +43,7 @@ def resetState():
             pass
     _feedCallbacks.clear()
     _feedPending.clear()
+    _feedMine.clear()
     _lastAttacker.clear()
 
 
@@ -117,6 +119,7 @@ def isMyDamage(vid):
 
 
 _feedPending = {}
+_feedMine = {}
 _feedCallbacks = {}
 _FEED_MERGE = 0.09
 _feedLog = [0]
@@ -126,9 +129,9 @@ _projCallLog = [0]
 def showDamageForVehicle(vid, damage):
     if not g_config.enabled or damage <= 0:
         return
-    if g_config.hideMyDamage and isMyDamage(vid):
-        return
+    myDamage = isMyDamage(vid)
     _feedPending[vid] = _feedPending.get(vid, 0) + damage
+    _feedMine[vid] = _feedMine.get(vid, False) or myDamage
     if vid not in _feedCallbacks:
         _feedCallbacks[vid] = BigWorld.callback(_FEED_MERGE, lambda: _feedFlush(vid))
 
@@ -136,6 +139,7 @@ def showDamageForVehicle(vid, damage):
 def _feedFlush(vid):
     _feedCallbacks.pop(vid, None)
     damage = _feedPending.pop(vid, 0)
+    myDamage = _feedMine.pop(vid, False)
     if damage <= 0:
         return
     ctrl = _ctrlRef[0]
@@ -156,10 +160,10 @@ def _feedFlush(vid):
             logger.info('[FlyingDamageGF] feedFlush: vehicle not usable vid=%s', vid)
         return
     isEnemy = _isEnemy(vehicle, vid)
-    color = g_config.colorForTeam(isEnemy)
+    color = _PLAYER_DAMAGE_COLOR if myDamage else g_config.colorForTeam(isEnemy)
     if _feedLog[0] < 80:
         _feedLog[0] += 1
-        logger.info('[FlyingDamageGF] feedFlush -> Gameface showDamage vid=%s dmg=%d', vid, damage)
+        logger.info('[FlyingDamageGF] feedFlush -> Gameface showDamage vid=%s dmg=%d mine=%s color=0x%06X', vid, damage, myDamage, color)
     ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0)
 
 
