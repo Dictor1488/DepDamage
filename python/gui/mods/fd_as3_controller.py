@@ -133,19 +133,34 @@ class Controller(object):
         except Exception:
             pass
 
+    def _getStartPoint(self, vehicleID):
+        try:
+            from flyingdamage.hooks import projectVehicleScreen
+            pos = projectVehicleScreen(int(vehicleID), quiet=True)
+            if pos and pos.get('ok'):
+                return True, float(pos.get('x', 0.0)), float(pos.get('y', 0.0))
+        except Exception:
+            pass
+        return False, 0.0, 0.0
+
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         if not self._battleMode or damage <= 0:
             return
-        state.queue.append({
+        hasStart, sx, sy = self._getStartPoint(vehicleID)
+        item = {
             'vid': str(int(vehicleID)),
             'dmg': int(damage),
             'color': int(colorRGB) & 0xFFFFFF,
             'size': int(fontSize),
             'alpha': float(alpha),
-        })
+            'hasStart': bool(hasStart),
+            'x': float(sx),
+            'y': float(sy),
+        }
+        state.queue.append(item)
         if self._logN < 100:
             self._logN += 1
-            logger.info('[FD_AS3] queued fresh vid=%s dmg=%s color=0x%06X q=%s', int(vehicleID), int(damage), int(colorRGB) & 0xFFFFFF, len(state.queue))
+            logger.info('[FD_AS3] queued screen vid=%s dmg=%s hasStart=%s xy=(%.1f,%.1f) color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), sx, sy, int(colorRGB) & 0xFFFFFF, len(state.queue))
         self._createFlash()
 
 
