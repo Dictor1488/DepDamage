@@ -17,6 +17,7 @@ POPUP_W = 220
 POPUP_H = 120
 POPUP_LIFE = 3.2
 POPUP_DESTROY_DELAY = 4.8
+POPUP_TRACK_INTERVAL = 0.033
 
 _OPENWG_OK = False
 _OPENWG_ERR = None
@@ -100,8 +101,9 @@ if _OPENWG_OK:
 
 
     class _DamagePopup(object):
-        def __init__(self, owner, payload, x, y, life):
+        def __init__(self, owner, vehicleID, payload, x, y, life):
             self._owner = owner
+            self._vehicleID = int(vehicleID)
             self._payload = payload
             self._x = int(round(x))
             self._y = int(round(y))
@@ -112,6 +114,8 @@ if _OPENWG_OK:
             self._token = 0
             self._destroyed = False
             self._cb = None
+            self._trackCb = None
+            self._trackLog = 0
 
         def payload(self):
             return json.dumps(self._payload, separators=(',', ':'))
@@ -143,7 +147,7 @@ if _OPENWG_OK:
             try:
                 self._window = _DamageWindow(_DamageView(self), parent, 'FlyingDamagePopup')
                 self._window.load()
-                logger.info('[FlyingDamageGF] popup window load requested at x=%s y=%s life=%.2f', self._x, self._y, self._life)
+                logger.info('[FlyingDamageGF] popup window load requested vid=%s at x=%s y=%s life=%.2f', self._vehicleID, self._x, self._y, self._life)
             except Exception:
                 logger.error('[FlyingDamageGF] popup window load failed', exc_info=True)
                 self.destroy()
@@ -152,9 +156,37 @@ if _OPENWG_OK:
             if self._destroyed:
                 return
             self._ready = True
+            self._updateMarkerPosition()
             self.move()
+            self._scheduleTrack()
             self._cb = BigWorld.callback(POPUP_DESTROY_DELAY, self.destroy)
-            logger.info('[FlyingDamageGF] popup ready moved x=%s y=%s keep=%.2f', self._x, self._y, POPUP_DESTROY_DELAY)
+            logger.info('[FlyingDamageGF] popup ready tracked vid=%s x=%s y=%s keep=%.2f', self._vehicleID, self._x, self._y, POPUP_DESTROY_DELAY)
+
+        def _scheduleTrack(self):
+            if self._destroyed or not self._ready:
+                return
+            self._trackCb = BigWorld.callback(POPUP_TRACK_INTERVAL, self._track)
+
+        def _track(self):
+            self._trackCb = None
+            if self._destroyed or not self._ready:
+                return
+            self._updateMarkerPosition()
+            self.move()
+            self._scheduleTrack()
+
+        def _updateMarkerPosition(self):
+            try:
+                from .hooks import projectVehicleScreen
+                pos = projectVehicleScreen(self._vehicleID)
+            except Exception:
+                pos = None
+            if pos and pos.get('ok'):
+                self._x = int(round(float(pos.get('x', self._x))))
+                self._y = int(round(float(pos.get('y', self._y))))
+                if self._trackLog < 3:
+                    self._trackLog += 1
+                    logger.info('[FlyingDamageGF] popup track vid=%s x=%s y=%s', self._vehicleID, self._x, self._y)
 
         def move(self):
             if self._window is None or not self._ready:
@@ -184,7 +216,13 @@ if _OPENWG_OK:
                     BigWorld.cancelCallback(self._cb)
             except Exception:
                 pass
+            try:
+                if self._trackCb is not None:
+                    BigWorld.cancelCallback(self._trackCb)
+            except Exception:
+                pass
             self._cb = None
+            self._trackCb = None
             if self._window is not None:
                 try:
                     self._window.destroy()
@@ -353,7 +391,7 @@ class Controller(object):
             'life': POPUP_LIFE
         }
         payload = {'seq': self._seq, 'events': [ev], 'w': POPUP_W, 'h': POPUP_H}
-        popup = _DamagePopup(self, payload, float(pos.get('x', 0.0)), float(pos.get('y', 0.0)), ev['life'])
+        popup = _DamagePopup(self, int(vehicleID), payload, float(pos.get('x', 0.0)), float(pos.get('y', 0.0)), ev['life'])
         self._popups.append(popup)
         popup.load()
 
