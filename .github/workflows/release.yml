@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '3.9.12'
+        default: '3.9.13'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -131,7 +131,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '3.9.12'
+            $version = '3.9.13'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
