@@ -4,6 +4,7 @@
     var root = document.getElementById('fd-root');
     var lastPayload = '';
     var started = false;
+    var nodes = {};
     var MAP = {
         '0': 'abcdef',
         '1': 'bc',
@@ -70,44 +71,54 @@
         return digit;
     }
 
-    function addDamage(ev) {
-        if (!ensureRoot() || !ev) return;
-
-        var x = num(ev.x, 60);
-        var y = num(ev.y, 37);
+    function buildNode(ev) {
         var textValue = String(Math.round(num(ev.dmg, 0)));
-        var life = Math.max(1.4, num(ev.life, 2.4));
-        var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
         var color = colorFromInt(ev.color);
         var digitW = 24;
         var boxW = 96;
         var totalW = textValue.length * digitW;
         var startX = Math.max(0, Math.round((boxW - totalW) * 0.5));
-
         var el = document.createElement('div');
         el.className = 'fd-damage';
-        el.style.left = x + 'px';
-        el.style.top = y + 'px';
-        el.style.opacity = alpha;
         for (var i = 0; i < textValue.length; i++) {
             el.appendChild(makeDigit(textValue.charAt(i), color, startX + i * digitW));
         }
         root.appendChild(el);
+        return el;
+    }
 
-        log('draw-popup-seg-small dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
-
-        var start = Date.now();
-        function anim() {
-            var t = Math.min(1, (Date.now() - start) / (life * 1000));
+    function updateEvents(events) {
+        if (!ensureRoot()) return;
+        var seen = {};
+        for (var i = 0; i < events.length; i++) {
+            var ev = events[i];
+            var id = String(ev.id);
+            seen[id] = true;
+            var el = nodes[id];
+            if (!el) {
+                el = buildNode(ev);
+                nodes[id] = el;
+                log('create-single id=' + id + ' dmg=' + ev.dmg);
+            }
+            var x = num(ev.x, 0);
+            var y = num(ev.y, 0) - 18;
+            var age = num(ev.age, 0);
+            var life = Math.max(0.4, num(ev.life, 1.8));
+            var t = Math.max(0, Math.min(1, age / life));
+            var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
             var dy = -24 * t;
-            var sc = 1 + 0.04 * (1 - Math.abs(t * 2 - 1));
             var op = t < 0.76 ? alpha : Math.max(0, alpha * (1 - (t - 0.76) / 0.24));
-            el.style.transform = 'translate(-50%, -50%) translateY(' + dy + 'px) scale(' + sc + ')';
+            el.style.left = Math.round(x) + 'px';
+            el.style.top = Math.round(y) + 'px';
             el.style.opacity = op;
-            if (t < 1) window.requestAnimationFrame(anim);
-            else if (el && el.parentNode) el.parentNode.removeChild(el);
+            el.style.transform = 'translate(-50%, -50%) translateY(' + dy + 'px)';
         }
-        window.requestAnimationFrame(anim);
+        for (var key in nodes) {
+            if (nodes.hasOwnProperty(key) && !seen[key]) {
+                if (nodes[key] && nodes[key].parentNode) nodes[key].parentNode.removeChild(nodes[key]);
+                delete nodes[key];
+            }
+        }
     }
 
     function getRawPayload() {
@@ -137,21 +148,18 @@
             return;
         }
         var events = payload && payload.events ? payload.events : [];
-        log('payload-popup seq=' + payload.seq + ' events=' + events.length);
-        for (var i = 0; i < events.length; i++) addDamage(events[i]);
+        log('payload-single seq=' + payload.seq + ' events=' + events.length + ' view=' + window.innerWidth + 'x' + window.innerHeight);
+        updateEvents(events);
     }
 
     function initialize() {
         if (started) return;
         started = true;
         ensureRoot();
-        log('initialize-popup-seg-small view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
+        log('initialize-single view=' + window.innerWidth + 'x' + window.innerHeight + ' root=' + !!root);
         ready();
         readPayload();
-        window.setTimeout(readPayload, 50);
-        window.setTimeout(readPayload, 150);
-        window.setTimeout(readPayload, 500);
-        window.setTimeout(readPayload, 1500);
+        window.setInterval(readPayload, 30);
         try {
             if (window.engine) {
                 window.engine.on('viewEnv.onDataChanged', readPayload);
