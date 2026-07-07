@@ -8,6 +8,7 @@ from gui.mods import fd_as3_state as state
 from gui.mods.fd_as3_flash import FlyingDamageFlash
 
 logger = logging.getLogger(__name__)
+_CLOSE_DELAY = 2.2
 
 
 class Controller(object):
@@ -15,6 +16,7 @@ class Controller(object):
     def __init__(self):
         self._battleMode = False
         self._flash = None
+        self._closeCb = None
         self._logN = 0
 
     def init(self):
@@ -48,7 +50,7 @@ class Controller(object):
         except Exception:
             pass
         self._battleMode = False
-        self._destroyFlash()
+        self._destroyFlash(True)
         try:
             from flyingdamage.utils import restore_overrides
             restore_overrides()
@@ -77,16 +79,41 @@ class Controller(object):
         if not self._battleMode:
             return
         logger.info('[FD_AS3] marker plugin start')
-        self._createFlash()
+        try:
+            from flyingdamage.hooks import setView
+            setView(self)
+        except Exception:
+            pass
+
+    def _destroyFlash(self, clearQueue=False):
+        try:
+            if self._closeCb is not None:
+                BigWorld.cancelCallback(self._closeCb)
+        except Exception:
+            pass
+        self._closeCb = None
+        if clearQueue:
+            del state.queue[:]
+        if self._flash is not None:
+            try:
+                self._flash.close()
+            except Exception:
+                pass
+            self._flash = None
+
+    def _closeLater(self):
+        self._closeCb = None
+        self._destroyFlash(False)
 
     def _createFlash(self):
-        if self._flash is not None:
+        if not self._battleMode:
             return
+        self._destroyFlash(False)
         try:
             self._flash = FlyingDamageFlash()
             self._flash.activate()
-            from flyingdamage.hooks import setView
-            setView(self)
+            self._closeCb = BigWorld.callback(_CLOSE_DELAY, self._closeLater)
+            logger.info('[FD_AS3] flash recreated q=%s', len(state.queue))
         except Exception:
             logger.error('[FD_AS3] create failed', exc_info=True)
             self._flash = None
@@ -94,7 +121,7 @@ class Controller(object):
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FD_AS3] battle leave')
         self._battleMode = False
-        self._destroyFlash()
+        self._destroyFlash(True)
         try:
             from flyingdamage.hooks import resetState
             resetState()
@@ -106,22 +133,8 @@ class Controller(object):
         except Exception:
             pass
 
-    def _destroyFlash(self):
-        del state.queue[:]
-        if self._flash is not None:
-            try:
-                self._flash.close()
-            except Exception:
-                pass
-            self._flash = None
-        try:
-            from flyingdamage.hooks import setView
-            setView(None)
-        except Exception:
-            pass
-
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
-        if not self._battleMode or self._flash is None or damage <= 0:
+        if not self._battleMode or damage <= 0:
             return
         state.queue.append({
             'vid': str(int(vehicleID)),
@@ -130,15 +143,10 @@ class Controller(object):
             'size': int(fontSize),
             'alpha': float(alpha),
         })
-        if self._logN < 80:
+        if self._logN < 100:
             self._logN += 1
-            logger.info('[FD_AS3] queued vid=%s dmg=%s color=0x%06X q=%s', int(vehicleID), int(damage), int(colorRGB) & 0xFFFFFF, len(state.queue))
-        try:
-            self._flash.as_populate()
-            if self._logN < 80:
-                logger.info('[FD_AS3] pushed as_populate after queue q=%s', len(state.queue))
-        except Exception:
-            logger.error('[FD_AS3] push as_populate failed', exc_info=True)
+            logger.info('[FD_AS3] queued fresh vid=%s dmg=%s color=0x%06X q=%s', int(vehicleID), int(damage), int(colorRGB) & 0xFFFFFF, len(state.queue))
+        self._createFlash()
 
 
 g_controller = Controller()
