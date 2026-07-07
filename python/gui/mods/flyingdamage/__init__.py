@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 # flyingdamage/__init__.py  --  Python 2.7
-# Gameface renderer for FlyingDamage. No AS3/SWF bridge is used.
-# Small WULF WindowLayer.OVERLAY popup windows are moved to projected damage coordinates.
+# Gameface renderer for FlyingDamage. Single battle-wide WULF window.
 
 import json
 import logging
+import time
 
 import BigWorld
 import GUI
@@ -13,12 +13,11 @@ from PlayerEvents import g_playerEvents
 logger = logging.getLogger(__name__)
 
 RES_MAP_ITEM_ID = 'mods/flyingdamage/FlyingDamageBattle/layoutID'
-POPUP_W = 120
-POPUP_H = 74
-POPUP_LIFE = 1.8
-POPUP_DESTROY_DELAY = 2.4
-POPUP_TRACK_INTERVAL = 0.12
-MAX_ACTIVE_POPUPS = 5
+VIEW_W = 2560
+VIEW_H = 1369
+DAMAGE_LIFE = 1.8
+UPDATE_INTERVAL = 0.08
+MAX_ACTIVE = 24
 
 _OPENWG_OK = False
 _OPENWG_ERR = None
@@ -59,184 +58,52 @@ except Exception as _e:
 if _OPENWG_OK:
     _LAYOUT = ModDynAccessor(RES_MAP_ITEM_ID)
 
-    class _DamageModel(ViewModel):
-        def __init__(self, payload):
-            self._payload = payload
-            super(_DamageModel, self).__init__(properties=1, commands=1)
+    class FlyingDamageModel(ViewModel):
+        def __init__(self):
+            super(FlyingDamageModel, self).__init__(properties=1, commands=1)
 
         def _initialize(self):
-            super(_DamageModel, self)._initialize()
-            self._addStringProperty('payload', self._payload)
+            super(FlyingDamageModel, self)._initialize()
+            self._addStringProperty('payload', '{}')
             self.onReady = self._addCommand('onReady')
 
         def setPayload(self, value):
             self._setString(0, value)
 
 
-    class _DamageView(ViewImpl):
-        def __init__(self, popup):
-            self._popup = popup
-            model = _DamageModel(popup.payload())
-            popup._setModel(model)
+    class FlyingDamageView(ViewImpl):
+        def __init__(self, controller):
+            self._controller = controller
+            self._model = FlyingDamageModel()
             layoutID = _LAYOUT()
-            logger.info('[FlyingDamageGF] popup layoutID=%s for %s', layoutID, RES_MAP_ITEM_ID)
-            settings = ViewSettings(layoutID=layoutID, flags=ViewFlags.VIEW, model=model)
-            super(_DamageView, self).__init__(settings)
+            logger.info('[FlyingDamageGF] single layoutID=%s for %s', layoutID, RES_MAP_ITEM_ID)
+            settings = ViewSettings(layoutID=layoutID, flags=ViewFlags.VIEW, model=self._model)
+            super(FlyingDamageView, self).__init__(settings)
 
         def _getEvents(self):
-            return ((self.getViewModel().onReady, self._popup.onReady),)
+            return ((self.getViewModel().onReady, self._controller._onViewReady),)
 
         def _finalize(self):
-            self._popup._setModel(None)
-            super(_DamageView, self)._finalize()
-            self._popup.onFinalized()
+            self._controller._onViewFinalized()
+            super(FlyingDamageView, self)._finalize()
 
-
-    class _DamageWindow(WindowImpl):
-        def __init__(self, content, parent, name):
-            super(_DamageWindow, self).__init__(WindowFlags.WINDOW,
-                                                content=content,
-                                                layer=WindowLayer.OVERLAY,
-                                                name=name,
-                                                parent=parent)
-
-
-    class _DamagePopup(object):
-        def __init__(self, owner, vehicleID, payload, x, y, life):
-            self._owner = owner
-            self._vehicleID = int(vehicleID)
-            self._payload = payload
-            self._x = int(round(x))
-            self._y = int(round(y))
-            self._life = float(life)
-            self._window = None
-            self._model = None
-            self._ready = False
-            self._token = 0
-            self._destroyed = False
-            self._cb = None
-            self._trackCb = None
-            self._trackLog = 0
-
-        def payload(self):
-            return json.dumps(self._payload, separators=(',', ':'))
-
-        def _setModel(self, model):
-            self._model = model
-
-        def load(self):
-            if self._destroyed or not self._owner._battleMode:
-                return
-            self._token += 1
-            token = self._token
-            if gamefaceResMap is not None and not gamefaceResMap.isResMapValidated:
-                gamefaceOnReady(lambda: self._load(token))
-            else:
-                self._load(token)
-
-        def _load(self, token, retry=0):
-            if token != self._token or self._destroyed or not self._owner._battleMode:
-                return
+        def pushPayload(self, payload):
             try:
-                parent = dependency.instance(IGuiLoader).windowsManager.getMainWindow()
+                self._model.setPayload(payload)
             except Exception:
-                parent = None
-            if parent is None or getattr(parent, 'proxy', None) is None or parent.windowStatus != WindowStatus.LOADED:
-                if retry < 40 and self._owner._battleMode:
-                    BigWorld.callback(0.1, lambda: self._load(token, retry + 1))
-                return
-            try:
-                self._window = _DamageWindow(_DamageView(self), parent, 'FlyingDamagePopup')
-                self._window.load()
-                logger.info('[FlyingDamageGF] popup window load requested vid=%s at x=%s y=%s life=%.2f', self._vehicleID, self._x, self._y, self._life)
-            except Exception:
-                logger.error('[FlyingDamageGF] popup window load failed', exc_info=True)
-                self.destroy()
+                logger.error('[FlyingDamageGF] setPayload failed', exc_info=True)
 
-        def onReady(self, *args):
-            if self._destroyed or not self._owner._battleMode:
-                self.destroy()
-                return
-            self._ready = True
-            self._updateMarkerPosition()
-            self.move()
-            self._scheduleTrack()
-            self._cb = BigWorld.callback(POPUP_DESTROY_DELAY, self.destroy)
-            logger.info('[FlyingDamageGF] popup ready tracked vid=%s x=%s y=%s keep=%.2f', self._vehicleID, self._x, self._y, POPUP_DESTROY_DELAY)
 
-        def _scheduleTrack(self):
-            if self._destroyed or not self._ready or not self._owner._battleMode:
-                return
-            self._trackCb = BigWorld.callback(POPUP_TRACK_INTERVAL, self._track)
-
-        def _track(self):
-            self._trackCb = None
-            if self._destroyed or not self._ready or not self._owner._battleMode:
-                self.destroy()
-                return
-            self._updateMarkerPosition()
-            self.move()
-            self._scheduleTrack()
-
-        def _updateMarkerPosition(self):
-            try:
-                from .hooks import projectVehicleScreen
-                pos = projectVehicleScreen(self._vehicleID, quiet=True)
-            except Exception:
-                pos = None
-            if pos and pos.get('ok'):
-                self._x = int(round(float(pos.get('x', self._x))))
-                self._y = int(round(float(pos.get('y', self._y))))
-                if self._trackLog < 2:
-                    self._trackLog += 1
-                    logger.info('[FlyingDamageGF] popup track vid=%s x=%s y=%s', self._vehicleID, self._x, self._y)
-
-        def move(self):
-            if self._window is None or not self._ready:
-                return
-            try:
-                sw, sh = GUI.screenResolution()[:2]
-            except Exception:
-                sw, sh = 1920, 1080
-            left = max(0, min(int(self._x - POPUP_W * 0.5), int(sw - POPUP_W)))
-            top = max(0, min(int(self._y - POPUP_H * 1.15), int(sh - POPUP_H)))
-            try:
-                self._window.move(left, top)
-            except Exception:
-                pass
-
-        def onFinalized(self):
-            self._window = None
-            self._model = None
-            self._ready = False
-            self._owner._forgetPopup(self)
-
-        def destroy(self):
-            self._destroyed = True
-            self._token += 1
-            try:
-                if self._cb is not None:
-                    BigWorld.cancelCallback(self._cb)
-            except Exception:
-                pass
-            try:
-                if self._trackCb is not None:
-                    BigWorld.cancelCallback(self._trackCb)
-            except Exception:
-                pass
-            self._cb = None
-            self._trackCb = None
-            if self._window is not None:
-                try:
-                    self._window.destroy()
-                except Exception:
-                    pass
-            self._window = None
-            self._model = None
-            self._ready = False
-            self._owner._forgetPopup(self)
+    class FlyingDamageWindow(WindowImpl):
+        def __init__(self, content, parent):
+            super(FlyingDamageWindow, self).__init__(WindowFlags.WINDOW,
+                                                     content=content,
+                                                     layer=WindowLayer.OVERLAY,
+                                                     name='FlyingDamageSingleWindow',
+                                                     parent=parent)
 else:
-    _DamagePopup = None
+    FlyingDamageView = object
+    FlyingDamageWindow = object
 
 
 class Controller(object):
@@ -245,14 +112,19 @@ class Controller(object):
         self._battleMode = False
         self._seq = 0
         self._pushLog = 0
-        self._popups = []
+        self._window = None
+        self._view = None
+        self._ready = False
+        self._loadToken = 0
+        self._updateCb = None
+        self._active = []
 
     def init(self):
         logger.info('[FlyingDamageGF] controller.init begin')
         if not _OPENWG_OK:
             logger.error('[FlyingDamageGF] OpenWG/Gameface imports failed: %s', _OPENWG_ERR)
         else:
-            logger.info('[FlyingDamageGF] OpenWG/Gameface imports OK popup-window mode')
+            logger.info('[FlyingDamageGF] OpenWG/Gameface imports OK single-window mode')
 
         try:
             from .settings.config import g_config
@@ -286,7 +158,8 @@ class Controller(object):
         except Exception:
             pass
         self._battleMode = False
-        self._destroyPopups()
+        self._stopUpdater()
+        self._destroyWindow()
         try:
             from .utils import restore_overrides
             restore_overrides()
@@ -295,12 +168,14 @@ class Controller(object):
 
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
-        logger.info('[FlyingDamageGF] avatar ready')
+        self._active = []
+        logger.info('[FlyingDamageGF] avatar ready single-window')
         try:
             from .hooks import setView
             setView(self)
         except Exception:
             pass
+        self._loadWindow()
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def onMarkerPluginStart(self):
@@ -310,6 +185,8 @@ class Controller(object):
             setView(self)
         except Exception:
             pass
+        if self._battleMode and self._window is None:
+            self._loadWindow()
 
     def _installSuppressionSafe(self):
         if not self._battleMode:
@@ -322,37 +199,103 @@ class Controller(object):
         except Exception:
             logger.error('[FlyingDamageGF] installSuppression failed', exc_info=True)
 
-    def _destroyPopups(self):
-        for popup in list(self._popups):
+    def _loadWindow(self):
+        if not _OPENWG_OK or not self._battleMode or self._window is not None:
+            return
+        self._loadToken += 1
+        token = self._loadToken
+        if gamefaceResMap is not None and not gamefaceResMap.isResMapValidated:
+            gamefaceOnReady(lambda: self._loadWindowImpl(token))
+        else:
+            self._loadWindowImpl(token)
+
+    def _loadWindowImpl(self, token, retry=0):
+        if token != self._loadToken or not self._battleMode or self._window is not None:
+            return
+        try:
+            parent = dependency.instance(IGuiLoader).windowsManager.getMainWindow()
+        except Exception:
+            parent = None
+        if parent is None or getattr(parent, 'proxy', None) is None or parent.windowStatus != WindowStatus.LOADED:
+            if retry < 80 and self._battleMode:
+                BigWorld.callback(0.1, lambda: self._loadWindowImpl(token, retry + 1))
+            return
+        try:
+            self._view = FlyingDamageView(self)
+            self._window = FlyingDamageWindow(self._view, parent)
+            self._window.load()
             try:
-                popup.destroy()
+                self._window.move(0, 0)
             except Exception:
                 pass
-        self._popups = []
+            logger.info('[FlyingDamageGF] single window load requested %sx%s', VIEW_W, VIEW_H)
+        except Exception:
+            logger.error('[FlyingDamageGF] single window load failed', exc_info=True)
+            self._destroyWindow()
+
+    def _onViewReady(self, *args):
+        if not self._battleMode:
+            self._destroyWindow()
+            return
+        self._ready = True
+        try:
+            if self._window is not None:
+                self._window.move(0, 0)
+        except Exception:
+            pass
+        logger.info('[FlyingDamageGF] single view ready')
+        self._pushPayload(force=True)
+        self._scheduleUpdater()
+
+    def _onViewFinalized(self):
+        self._ready = False
+        self._view = None
+        self._window = None
+        self._stopUpdater()
+
+    def _destroyWindow(self):
+        self._loadToken += 1
+        self._ready = False
+        self._active = []
+        self._stopUpdater()
+        win = self._window
+        self._window = None
+        self._view = None
+        if win is not None:
+            try:
+                win.destroy()
+            except Exception:
+                pass
         try:
             from .hooks import setView
             setView(None)
         except Exception:
             pass
 
-    def _forgetPopup(self, popup):
+    def _stopUpdater(self):
         try:
-            self._popups.remove(popup)
-        except ValueError:
+            if self._updateCb is not None:
+                BigWorld.cancelCallback(self._updateCb)
+        except Exception:
             pass
+        self._updateCb = None
 
-    def _trimPopups(self):
-        while len(self._popups) >= MAX_ACTIVE_POPUPS:
-            popup = self._popups[0]
-            try:
-                popup.destroy()
-            except Exception:
-                break
+    def _scheduleUpdater(self):
+        if not self._battleMode or not self._ready:
+            return
+        self._updateCb = BigWorld.callback(UPDATE_INTERVAL, self._update)
+
+    def _update(self):
+        self._updateCb = None
+        if not self._battleMode or not self._ready:
+            return
+        self._pushPayload(force=False)
+        self._scheduleUpdater()
 
     def _onBattleLeave(self, *a, **kw):
-        logger.info('[FlyingDamageGF] battle leave')
+        logger.info('[FlyingDamageGF] battle leave single-window')
         self._battleMode = False
-        self._destroyPopups()
+        self._destroyWindow()
         try:
             from .hooks import resetState
             resetState()
@@ -367,53 +310,93 @@ class Controller(object):
     def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
         if damage <= 0 or not self._battleMode:
             return
-        if not _OPENWG_OK or _DamagePopup is None:
-            if self._pushLog < 20:
-                self._pushLog += 1
-                logger.info('[FlyingDamageGF] skip damage: Gameface unavailable vid=%s dmg=%s', vehicleID, damage)
+        if not _OPENWG_OK:
             return
+        if self._window is None:
+            self._loadWindow()
 
         try:
             from .hooks import projectVehicleScreen
             pos = projectVehicleScreen(int(vehicleID))
         except Exception:
             pos = None
-
         if not pos or not pos.get('ok'):
             if self._pushLog < 80:
                 self._pushLog += 1
                 logger.info('[FlyingDamageGF] skip damage: no screen pos vid=%s dmg=%s pos=%s', vehicleID, damage, pos)
             return
 
-        try:
-            sw, sh = GUI.screenResolution()[:2]
-        except Exception:
-            sw, sh = 1920, 1080
-
-        self._trimPopups()
+        now = time.time()
         self._seq += 1
-        ev = {
+        item = {
             'id': self._seq,
             'vid': int(vehicleID),
             'dmg': int(damage),
-            'x': POPUP_W * 0.5,
-            'y': POPUP_H * 0.50,
-            'sw': POPUP_W,
-            'sh': POPUP_H,
             'color': int(colorRGB) & 0xFFFFFF,
-            'size': int(fontSize),
             'alpha': float(alpha),
-            'life': POPUP_LIFE
+            'start': now,
+            'life': DAMAGE_LIFE,
+            'x': float(pos.get('x', 0.0)),
+            'y': float(pos.get('y', 0.0))
         }
-        payload = {'seq': self._seq, 'events': [ev], 'w': POPUP_W, 'h': POPUP_H}
-        popup = _DamagePopup(self, int(vehicleID), payload, float(pos.get('x', 0.0)), float(pos.get('y', 0.0)), ev['life'])
-        self._popups.append(popup)
-        popup.load()
-
+        self._active.append(item)
+        if len(self._active) > MAX_ACTIVE:
+            self._active = self._active[-MAX_ACTIVE:]
         if self._pushLog < 120:
             self._pushLog += 1
-            logger.info('[FlyingDamageGF] popup damage id=%s vid=%s dmg=%s screenxy=(%.1f,%.1f) screen=%sx%s active=%s',
-                        self._seq, int(vehicleID), int(damage), float(pos.get('x', 0.0)), float(pos.get('y', 0.0)), sw, sh, len(self._popups))
+            logger.info('[FlyingDamageGF] single add id=%s vid=%s dmg=%s xy=(%.1f,%.1f) active=%s',
+                        self._seq, int(vehicleID), int(damage), item['x'], item['y'], len(self._active))
+        self._pushPayload(force=True)
+
+    def _pushPayload(self, force=False):
+        if not self._battleMode or not self._ready or self._view is None:
+            return
+        now = time.time()
+        events = []
+        alive = []
+        try:
+            from .hooks import projectVehicleScreen
+        except Exception:
+            projectVehicleScreen = None
+        for item in self._active:
+            age = now - item.get('start', now)
+            life = item.get('life', DAMAGE_LIFE)
+            if age > life:
+                continue
+            if projectVehicleScreen is not None:
+                try:
+                    pos = projectVehicleScreen(int(item['vid']), quiet=True)
+                except Exception:
+                    pos = None
+                if pos and pos.get('ok'):
+                    item['x'] = float(pos.get('x', item['x']))
+                    item['y'] = float(pos.get('y', item['y']))
+            ev = {
+                'id': int(item['id']),
+                'vid': int(item['vid']),
+                'dmg': int(item['dmg']),
+                'x': float(item['x']),
+                'y': float(item['y']),
+                'color': int(item['color']) & 0xFFFFFF,
+                'alpha': float(item.get('alpha', 1.0)),
+                'age': float(age),
+                'life': float(life)
+            }
+            events.append(ev)
+            alive.append(item)
+        self._active = alive
+        payload = {
+            'seq': self._seq,
+            'events': events,
+            'sw': int(GUI.screenResolution()[0]),
+            'sh': int(GUI.screenResolution()[1]),
+            'vw': VIEW_W,
+            'vh': VIEW_H
+        }
+        try:
+            self._view.pushPayload(json.dumps(payload, separators=(',', ':')))
+        except Exception:
+            logger.error('[FlyingDamageGF] push payload failed', exc_info=True)
 
 
 g_controller = Controller()
