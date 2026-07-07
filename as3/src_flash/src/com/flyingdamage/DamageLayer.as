@@ -17,12 +17,12 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false):void
+        public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false, hasHp:Boolean = false, hpCur:int = 0, hpBefore:int = 0, hpMax:int = 0):void
         {
             if (damage <= 0)
                 return;
 
-            var splash:HpSplash = new HpSplash(vehicleID, damage, colorRGB, startX, startY, hasStart);
+            var splash:HpSplash = new HpSplash(vehicleID, damage, colorRGB, startX, startY, hasStart, hasHp, hpCur, hpBefore, hpMax);
             addChild(splash);
             _splashes.push(splash);
 
