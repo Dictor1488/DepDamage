@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '3.9.9'
+        default: '3.9.10'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -81,9 +81,11 @@ jobs:
             '-source-path+=as3\src_flash\src',
             '-static-link-runtime-shared-libraries=true',
             '-use-network=false',
+            '-compiler.playerglobal-home=C:\flex-sdk\frameworks\libs\player',
             '-target-player=21.0',
             '-swf-version=32',
             '-default-size=2560,1369',
+            '-external-library-path+=C:\flex-sdk\frameworks\libs\player\21.0\playerglobal.swc',
             '-output=resources\in\gui\flash\FlyingDamageApp.swf'
           )
           Get-ChildItem as3\libs -Filter *.swc | Where-Object { $_.Name -ne 'playerglobal.swc' } | ForEach-Object {
@@ -111,7 +113,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '3.9.9'
+            $version = '3.9.10'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
