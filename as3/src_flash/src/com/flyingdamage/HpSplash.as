@@ -16,6 +16,10 @@ package com.flyingdamage
         private var _shine:Sprite;
         private var _color:uint;
         private var _damage:int;
+        private var _hasHp:Boolean;
+        private var _hpCur:int;
+        private var _hpBefore:int;
+        private var _hpMax:int;
 
         private static const LIFETIME:Number = 0.85;
         private static const BAR_WIDTH:Number = 70.0;
@@ -23,7 +27,7 @@ package com.flyingdamage
         private static const BAR_Y:Number = -19.0;
         private static const BAR_X:Number = -35.0;
 
-        public function HpSplash(vehicleID:String, damage:int, color:uint, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false)
+        public function HpSplash(vehicleID:String, damage:int, color:uint, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false, hasHp:Boolean = false, hpCur:int = 0, hpBefore:int = 0, hpMax:int = 0)
         {
             this.vehicleID = vehicleID;
             _damage = damage;
@@ -31,6 +35,10 @@ package com.flyingdamage
             _markerX = startX;
             _markerY = startY;
             _hasMarker = hasStart;
+            _hasHp = hasHp;
+            _hpCur = hpCur;
+            _hpBefore = hpBefore;
+            _hpMax = hpMax;
             _bornAt = getTimer();
 
             mouseEnabled = false;
@@ -79,19 +87,43 @@ package com.flyingdamage
 
         private function drawParts(scale:Number):void
         {
-            var w:Number = damageToWidth(_damage) * scale;
+            var startX:Number;
+            var w:Number;
+
+            if (_hasHp && _hpMax > 0 && _hpBefore >= _hpCur)
+            {
+                var beforeRatio:Number = clamp01(Number(_hpBefore) / Number(_hpMax));
+                var curRatio:Number = clamp01(Number(_hpCur) / Number(_hpMax));
+                var beforePx:Number = BAR_WIDTH * beforeRatio;
+                var curPx:Number = BAR_WIDTH * curRatio;
+                w = (beforePx - curPx) * scale;
+                startX = BAR_X + curPx;
+            }
+            else
+            {
+                w = damageToWidth(_damage) * scale;
+                startX = BAR_X + BAR_WIDTH - w;
+            }
+
             if (w < 3) w = 3;
             if (w > BAR_WIDTH) w = BAR_WIDTH;
 
             _bar.graphics.clear();
             _bar.graphics.beginFill(_color, 0.85);
-            _bar.graphics.drawRect(BAR_X + BAR_WIDTH - w, 0, w, BAR_HEIGHT);
+            _bar.graphics.drawRect(startX, 0, w, BAR_HEIGHT);
             _bar.graphics.endFill();
 
             _shine.graphics.clear();
             _shine.graphics.beginFill(0xFFFFFF, 0.75);
-            _shine.graphics.drawRect(BAR_X + BAR_WIDTH - w - 1, -1, 2, BAR_HEIGHT + 2);
+            _shine.graphics.drawRect(startX - 1, -1, 2, BAR_HEIGHT + 2);
             _shine.graphics.endFill();
+        }
+
+        private function clamp01(v:Number):Number
+        {
+            if (v < 0) return 0;
+            if (v > 1) return 1;
+            return v;
         }
 
         private function damageToWidth(d:int):Number
