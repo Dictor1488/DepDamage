@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '3.9.6'
+        default: '3.9.7'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -26,7 +26,7 @@ permissions:
 env:
   MOD_ID: 'com.author.flyingdamage'
   MOD_NAME: 'Flying Damage'
-  MOD_DESCRIPTION: 'AS3/Scaleform floating damage numbers above vehicle markers.'
+  MOD_DESCRIPTION: 'AS3 Scaleform floating damage numbers above vehicle markers.'
   FLEX_VERSION: '4.16.1'
 
 jobs:
@@ -79,8 +79,8 @@ jobs:
             '-source-path+=as3\src_flash\src',
             '-static-link-runtime-shared-libraries=true',
             '-use-network=false',
-            '-target-player=25.0',
-            '-swf-version=36',
+            '-target-player=11.1',
+            '-swf-version=14',
             '-default-size=2560,1369',
             '-output=resources\in\gui\flash\FlyingDamageApp.swf',
             'as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as'
@@ -106,7 +106,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '3.9.6'
+            $version = '3.9.7'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
