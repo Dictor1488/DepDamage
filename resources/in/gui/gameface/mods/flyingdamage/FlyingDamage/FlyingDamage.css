@@ -1,6 +1,6 @@
 html, body {
-  width: 120px;
-  height: 74px;
+  width: 2560px;
+  height: 1369px;
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -9,8 +9,8 @@ html, body {
 * { box-sizing: border-box; }
 #fd-root {
   position: relative;
-  width: 120px;
-  height: 74px;
+  width: 2560px;
+  height: 1369px;
   overflow: visible;
   pointer-events: none;
   background: transparent;
@@ -18,12 +18,9 @@ html, body {
 }
 .fd-damage {
   position: absolute;
-  left: 60px;
-  top: 37px;
   width: 96px;
   height: 48px;
   transform: translate(-50%, -50%);
-  will-change: transform, opacity;
 }
 .fd-digit {
   position: absolute;
@@ -38,9 +35,6 @@ html, body {
 }
 .fd-seg.on {
   background: #ff3838;
-  box-shadow:
-    0 0 0 1px #2a0000,
-    0 0 4px #000000;
 }
 .fd-a, .fd-d, .fd-g {
   left: 4px;
