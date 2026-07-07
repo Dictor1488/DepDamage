@@ -19,10 +19,11 @@ package com.flyingdamage
         private var _originY:Number = 0;
         private var _hasOrigin:Boolean = false;
 
-        private static const LIFETIME:Number = 1.6;
-        private static const RISE_PIXELS:Number = 42.0;
-        private static const FADE_START:Number = 0.55;
-        private static const ANCHOR_OFFSET_Y:Number = -82.0;
+        private static const LIFETIME:Number = 2.0;
+        private static const RISE_PIXELS:Number = 40.0;
+        private static const FADE_START:Number = 0.75;
+        private static const DAMAGE_X_OFFSET:Number = -15.0;
+        private static const ANCHOR_OFFSET_Y:Number = -96.0;
 
         public function FloatingNumber(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, baseAlpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false)
         {
@@ -76,7 +77,7 @@ package com.flyingdamage
             }
 
             visible = true;
-            x = _originX;
+            x = _originX + DAMAGE_X_OFFSET;
             y = _originY + ANCHOR_OFFSET_Y - RISE_PIXELS * progress;
 
             if (progress < FADE_START)
