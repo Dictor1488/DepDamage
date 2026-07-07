@@ -49,7 +49,7 @@
         var y = num(ev.y, 66);
         var textValue = String(Math.round(num(ev.dmg, 0)));
         var size = Math.max(24, num(ev.size, 38));
-        var life = Math.max(0.8, num(ev.life, 1.6));
+        var life = Math.max(2.8, num(ev.life, 3.2));
         var alpha = Math.max(0.2, Math.min(1, num(ev.alpha, 1)));
 
         var el = document.createElement('div');
@@ -62,14 +62,14 @@
         el.style.opacity = alpha;
         root.appendChild(el);
 
-        log('draw-popup-html dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight);
+        log('draw-popup-html dmg=' + textValue + ' xy=' + Math.round(x) + ',' + Math.round(y) + ' view=' + window.innerWidth + 'x' + window.innerHeight + ' life=' + life);
 
         var start = Date.now();
         function anim() {
             var t = Math.min(1, (Date.now() - start) / (life * 1000));
             var dy = -58 * t;
             var sc = 1 + 0.08 * (1 - Math.abs(t * 2 - 1));
-            var op = t < 0.72 ? alpha : Math.max(0, alpha * (1 - (t - 0.72) / 0.28));
+            var op = t < 0.78 ? alpha : Math.max(0, alpha * (1 - (t - 0.78) / 0.22));
             el.style.transform = 'translate(-50%, -50%) translateY(' + dy + 'px) scale(' + sc + ')';
             el.style.opacity = op;
             if (t < 1) window.requestAnimationFrame(anim);
@@ -119,6 +119,7 @@
         window.setTimeout(readPayload, 50);
         window.setTimeout(readPayload, 150);
         window.setTimeout(readPayload, 500);
+        window.setTimeout(readPayload, 1500);
         try {
             if (window.engine) {
                 window.engine.on('viewEnv.onDataChanged', readPayload);
