@@ -51,21 +51,21 @@ class FlyingDamageMeta(BaseDAAPIModule):
 
     def as_populate(self):
         try:
-            if self._isDAAPIInited() and self.flashObject is not None and hasattr(self.flashObject, 'as_populate'):
+            if self._isDAAPIInited() and self.flashObject is not None:
                 self.flashObject.as_populate()
         except Exception:
             logger.error('[FD_AS3] as_populate failed', exc_info=True)
 
     def as_update(self):
         try:
-            if self._isDAAPIInited() and self.flashObject is not None and hasattr(self.flashObject, 'as_update'):
+            if self._isDAAPIInited() and self.flashObject is not None:
                 self.flashObject.as_update()
         except Exception:
             logger.error('[FD_AS3] as_update failed', exc_info=True)
 
     def as_dispose(self):
         try:
-            if self._isDAAPIInited() and self.flashObject is not None and hasattr(self.flashObject, 'as_dispose'):
+            if self._isDAAPIInited() and self.flashObject is not None:
                 self.flashObject.as_dispose()
         except Exception:
             pass
