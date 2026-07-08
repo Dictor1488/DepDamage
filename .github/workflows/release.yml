@@ -9,7 +9,7 @@ on:
       version:
         description: 'Mod version'
         required: true
-        default: '4.0.0'
+        default: '4.0.2'
       game_version:
         description: 'World of Tanks version'
         required: true
@@ -26,7 +26,7 @@ permissions:
 env:
   MOD_ID: 'com.author.flyingdamage'
   MOD_NAME: 'Flying Damage'
-  MOD_DESCRIPTION: 'AS3 VehicleMarker-style damage label logic port.'
+  MOD_DESCRIPTION: 'AS3 VehicleMarker damage label logic port compiled into battleVehicleMarkersApp.swf.'
   FLEX_VERSION: '4.16.1'
   FLASH_PLAYER_VERSION: '32.0'
   SWF_VERSION: '39'
@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\flex-sdk
-          key: flex-sdk-${{ env.FLEX_VERSION }}-${{ env.FLASH_PLAYER_VERSION }}-swf${{ env.SWF_VERSION }}-v1
+          key: flex-sdk-${{ env.FLEX_VERSION }}-${{ env.FLASH_PLAYER_VERSION }}-swf${{ env.SWF_VERSION }}-v2
 
       - name: Download Flex SDK
         if: steps.cache-flex.outputs.cache-hit != 'true'
@@ -111,38 +111,6 @@ jobs:
             $content | Set-Content $flexConfig -Encoding UTF8
           }
 
-      - name: Compile AS3 SWF
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path resources\in\gui\flash | Out-Null
-          $args = @(
-            '-source-path+=as3\src_flash\src',
-            '-static-link-runtime-shared-libraries=true',
-            '-use-network=false',
-            "-target-player=$env:FLASH_PLAYER_VERSION",
-            "-swf-version=$env:SWF_VERSION",
-            '-default-size=2560,1369',
-            '-output=resources\in\gui\flash\FlyingDamageApp.swf'
-          )
-          Get-ChildItem as3\libs -Filter *.swc -Recurse | ForEach-Object {
-            if ($_.Name -eq 'playerglobal.swc') {
-              $args += "-library-path+=$($_.FullName)"
-            } else {
-              $args += "-external-library-path+=$($_.FullName)"
-            }
-          }
-          $args += 'as3\src_flash\src\com\flyingdamage\FlyingDamageApp.as'
-          & 'C:\flex-sdk\bin\mxmlc.bat' @args
-          if ($LASTEXITCODE -ne 0) { throw "mxmlc failed with exit code $LASTEXITCODE" }
-          if (-not (Test-Path resources\in\gui\flash\FlyingDamageApp.swf)) { throw 'SWF compile failed' }
-
-      - name: Install Python 2.7 for pyc compile
-        shell: pwsh
-        run: |
-          choco install python2 -y --no-progress
-          if (-not (Test-Path 'C:\Python27\python.exe')) { throw 'Python 2.7 not found at C:\Python27\python.exe' }
-          & 'C:\Python27\python.exe' --version
-
       - name: Resolve version
         shell: pwsh
         run: |
@@ -153,7 +121,7 @@ jobs:
             $version = '${{ github.ref_name }}'.TrimStart('v')
             $game = '2.3.0.1'
           } else {
-            $version = '4.0.0'
+            $version = '4.0.2'
             $game = '2.3.0.1'
           }
           echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
@@ -164,15 +132,27 @@ jobs:
         run: |
           $json = @{
             version = 5
-            software = @{ animate = ' '; python = 'C:/Python27/python.exe' }
+            software = @{
+              animate = ' '
+              python = 'C:/Python27/python.exe'
+              mxmlc = 'C:/flex-sdk/bin/mxmlc.bat'
+              flex_sdk = 'C:/flex-sdk'
+            }
             game = @{ force = $false; folder = 'World_of_Tanks_EU'; version = $env:GAME_VERSION }
             info = @{ id = $env:MOD_ID; name = $env:MOD_NAME; description = $env:MOD_DESCRIPTION; version = $env:PROJECT_VERSION }
           } | ConvertTo-Json -Depth 6
           $json | Set-Content build.json -Encoding UTF8
           Get-Content build.json
 
+      - name: Install Python 2.7 for pyc compile
+        shell: pwsh
+        run: |
+          choco install python2 -y --no-progress
+          if (-not (Test-Path 'C:\Python27\python.exe')) { throw 'Python 2.7 not found at C:\Python27\python.exe' }
+          & 'C:\Python27\python.exe' --version
+
       - name: Build wotmod
-        run: python build.py --distribute
+        run: python build.py --flash --distribute
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
