@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: C:\flex-sdk
-          key: flex-sdk-${{ env.FLEX_VERSION }}-${{ env.FLASH_PLAYER_VERSION }}-swf${{ env.SWF_VERSION }}-v2
+          key: flex-sdk-${{ env.FLEX_VERSION }}-${{ env.FLASH_PLAYER_VERSION }}-swf${{ env.SWF_VERSION }}-v3
 
       - name: Download Flex SDK
         if: steps.cache-flex.outputs.cache-hit != 'true'
@@ -100,10 +100,14 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path as3\libs\playerglobal.swc)) { throw 'Missing as3\libs\playerglobal.swc' }
-          $playerDir = "C:\flex-sdk\frameworks\libs\player\$env:FLASH_PLAYER_VERSION"
-          New-Item -ItemType Directory -Force -Path $playerDir | Out-Null
-          Copy-Item as3\libs\playerglobal.swc "$playerDir\playerglobal.swc" -Force
-          Copy-Item as3\libs\playerglobal.swc "C:\flex-sdk\frameworks\libs\player\playerglobal.swc" -Force
+          $playerRoot = 'C:\flex-sdk\frameworks\libs\player'
+          New-Item -ItemType Directory -Force -Path $playerRoot | Out-Null
+          foreach ($ver in @($env:FLASH_PLAYER_VERSION, '27.0')) {
+            $dir = Join-Path $playerRoot $ver
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item as3\libs\playerglobal.swc (Join-Path $dir 'playerglobal.swc') -Force
+          }
+          Copy-Item as3\libs\playerglobal.swc (Join-Path $playerRoot 'playerglobal.swc') -Force
           $flexConfig = 'C:\flex-sdk\frameworks\flex-config.xml'
           if (Test-Path $flexConfig) {
             $content = Get-Content $flexConfig -Raw
