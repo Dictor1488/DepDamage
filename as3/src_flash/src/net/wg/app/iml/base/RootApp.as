@@ -1,6 +1,7 @@
 package net.wg.app.iml.base
 {
     import flash.display.Sprite;
+    import flash.events.Event;
     import net.wg.infrastructure.interfaces.IRootAppMainContent;
 
     /**
@@ -35,7 +36,7 @@ package net.wg.app.iml.base
             {
                 if(loaderInfo != null && loaderInfo.sharedEvents != null)
                 {
-                    loaderInfo.sharedEvents.dispatchEvent(new flash.events.Event(_registerCallback));
+                    loaderInfo.sharedEvents.dispatchEvent(new Event(_registerCallback));
                 }
             }
             catch(e:Error)
