@@ -21,7 +21,7 @@ package com.flyingdamage
         private var _hpBefore:int;
         private var _hpMax:int;
 
-        private static const LIFETIME:Number = 0.85;
+        private static const LIFETIME:Number = 0.65;
         private static const BAR_WIDTH:Number = 70.0;
         private static const BAR_HEIGHT:Number = 4.0;
         private static const BAR_Y:Number = -19.0;
@@ -45,11 +45,11 @@ package com.flyingdamage
             mouseChildren = false;
 
             _bar = new Sprite();
-            _bar.filters = [ new GlowFilter(0x000000, 0.9, 3, 3, 2, 2), new GlowFilter(_color, 0.55, 8, 5, 1.2, 1) ];
+            _bar.filters = [ new GlowFilter(0x000000, 0.9, 3, 3, 2, 2), new GlowFilter(_color, 0.45, 7, 4, 1.0, 1) ];
             addChild(_bar);
 
             _shine = new Sprite();
-            _shine.filters = [ new GlowFilter(0xFFFFFF, 0.8, 5, 5, 1.5, 1) ];
+            _shine.filters = [ new GlowFilter(0xFFFFFF, 0.65, 4, 4, 1.2, 1) ];
             addChild(_shine);
 
             drawParts(1.0);
@@ -62,7 +62,9 @@ package com.flyingdamage
             if (age >= LIFETIME)
                 return false;
 
-            if (pos != null && pos.ok)
+            // Hit-time snapshot mode, same as damage numbers.
+            // Take marker position once, then do not follow camera anymore.
+            if (!_hasMarker && pos != null && pos.ok)
             {
                 _markerX = Number(pos.x);
                 _markerY = Number(pos.y);
@@ -81,7 +83,7 @@ package com.flyingdamage
 
             var p:Number = age / LIFETIME;
             alpha = 1.0 - p;
-            drawParts(1.0 - p * 0.35);
+            drawParts(1.0 - p * 0.25);
             return true;
         }
 
@@ -109,12 +111,12 @@ package com.flyingdamage
             if (w > BAR_WIDTH) w = BAR_WIDTH;
 
             _bar.graphics.clear();
-            _bar.graphics.beginFill(_color, 0.85);
+            _bar.graphics.beginFill(_color, 0.75);
             _bar.graphics.drawRect(startX, 0, w, BAR_HEIGHT);
             _bar.graphics.endFill();
 
             _shine.graphics.clear();
-            _shine.graphics.beginFill(0xFFFFFF, 0.75);
+            _shine.graphics.beginFill(0xFFFFFF, 0.60);
             _shine.graphics.drawRect(startX - 1, -1, 2, BAR_HEIGHT + 2);
             _shine.graphics.endFill();
         }
