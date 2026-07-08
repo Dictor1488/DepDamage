@@ -172,6 +172,19 @@ def _compactArgs(args, maxCount=8, limit=120):
         return '<args>'
 
 
+def _screenSize():
+    try:
+        sw, sh = GUI.screenResolution()[:2]
+        return float(sw), float(sh)
+    except Exception:
+        return 0.0, 0.0
+
+
+def _emptyPos(ok=False):
+    sw, sh = _screenSize()
+    return {'x': 0.0, 'y': 0.0, 'ok': bool(ok), 'screenW': sw, 'screenH': sh}
+
+
 def projectVehicleScreen(vid, quiet=False):
     try:
         vehicle = BigWorld.entity(vid)
@@ -179,26 +192,26 @@ def projectVehicleScreen(vid, quiet=False):
             if not quiet and _projCallLog[0] < 30:
                 _projCallLog[0] += 1
                 logger.info('[FlyingDamageGF] project vid=%s failed vehicle usable=%s', vid, vehicle is not None)
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
+            return _emptyPos(False)
         res = _project(vehicle)
         if res is None:
             if not quiet and _projCallLog[0] < 30:
                 _projCallLog[0] += 1
                 logger.info('[FlyingDamageGF] project vid=%s failed res=None', vid)
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
-        sx, sy, visible, source = res
+            return _emptyPos(False)
+        sx, sy, visible, source, sw, sh = res
         if sx is None or sy is None:
-            return {'x': 0.0, 'y': 0.0, 'ok': False}
+            return _emptyPos(False)
         if not quiet and _projCallLog[0] < 100:
             _projCallLog[0] += 1
-            logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) visible=%s source=%s markerYOffset=%.1f', vid, float(sx), float(sy), visible, source, _MARKER_Y_OFFSET)
+            logger.info('[FlyingDamageGF] project vid=%s xy=(%.1f,%.1f) screen=(%.1f,%.1f) visible=%s source=%s markerYOffset=%.1f', vid, float(sx), float(sy), float(sw), float(sh), visible, source, _MARKER_Y_OFFSET)
         if not visible:
-            return {'x': float(sx), 'y': float(sy), 'ok': False}
-        return {'x': float(sx), 'y': float(sy), 'ok': True}
+            return {'x': float(sx), 'y': float(sy), 'ok': False, 'screenW': float(sw), 'screenH': float(sh)}
+        return {'x': float(sx), 'y': float(sy), 'ok': True, 'screenW': float(sw), 'screenH': float(sh)}
     except Exception:
         if not quiet:
             logger.error('[FlyingDamageGF] projectVehicleScreen failed vid=%s', vid, exc_info=True)
-        return {'x': 0.0, 'y': 0.0, 'ok': False}
+        return _emptyPos(False)
 
 
 def _isVehicleUsable(vehicle):
@@ -241,6 +254,8 @@ def _buildVP():
         cam = BigWorld.camera()
         if cam is None:
             return None
+        # Keep the old projection path, but final placement is scaled in AS3 from
+        # GUI.screenResolution to Flash stage coordinates.
         m.preMultiply(cam.matrix)
         return m
     except Exception:
@@ -296,9 +311,11 @@ def _project(vehicle):
     cx = v.x / w
     cy = v.y / w
     visible = -1 <= cx <= 1 and -1 <= cy <= 1
-    sw, sh = GUI.screenResolution()[:2]
+    sw, sh = _screenSize()
+    if sw <= 0 or sh <= 0:
+        sw, sh = GUI.screenResolution()[:2]
     x = (0.5 + 0.5 * cx) * sw
     y = (0.5 - 0.5 * cy) * sh
     if source == 'marker':
         y += _MARKER_Y_OFFSET
-    return (x, y, visible, source)
+    return (x, y, visible, source, float(sw), float(sh))
