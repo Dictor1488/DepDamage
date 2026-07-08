@@ -17,6 +17,7 @@ class Controller(object):
         self._battleMode = False
         self._flash = None
         self._logN = 0
+        self._pollLogN = 0
 
     def init(self):
         logger.info('[FD_AS3] controller init')
@@ -60,9 +61,10 @@ class Controller(object):
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
         self._logN = 0
+        self._pollLogN = 0
         del state.queue[:]
         logger.info('[FD_AS3] avatar ready')
-        self._ensureFlash()
+        self._ensureFlash(forcePopulate=True)
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def _installSuppressionSafe(self):
@@ -85,7 +87,7 @@ class Controller(object):
             setView(self)
         except Exception:
             pass
-        self._ensureFlash()
+        self._ensureFlash(forcePopulate=True)
 
     def _destroyFlash(self, clearQueue=False):
         if clearQueue:
@@ -97,14 +99,19 @@ class Controller(object):
                 pass
             self._flash = None
 
-    def _ensureFlash(self):
+    def _ensureFlash(self, forcePopulate=False):
         if not self._battleMode:
             return
         if self._flash is not None:
             try:
-                self._flash.as_update()
+                # Scaleform exposes as_populate reliably in logs; as_update can be
+                # swallowed by the proxy on some builds. Use as_populate to poll queue.
+                if self._pollLogN < 120:
+                    self._pollLogN += 1
+                    logger.info('[FD_AS3] poll existing flash q=%s', len(state.queue))
+                self._flash.as_populate()
             except Exception:
-                pass
+                logger.error('[FD_AS3] poll existing flash failed', exc_info=True)
             return
         try:
             self._flash = FlyingDamageFlash()
@@ -193,7 +200,7 @@ class Controller(object):
         if self._logN < 120:
             self._logN += 1
             logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, damageType, int(colorRGB) & 0xFFFFFF, len(state.queue))
-        self._ensureFlash()
+        self._ensureFlash(forcePopulate=True)
 
 
 g_controller = Controller()
