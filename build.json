@@ -12,7 +12,7 @@
     "info": {
         "id": "com.author.flyingdamage",
         "name": "Flying Damage",
-        "description": "Floating damage numbers above tanks. World-anchor / XVM-like projection mode, screen fallback, smooth rise + fade.",
-        "version": "3.3.0"
+        "description": "Uses native VehicleMarker.addDamageLabel damage numbers bound to the real tank marker. No FlyingDamageApp overlay renderer.",
+        "version": "3.3.1"
     }
 }
