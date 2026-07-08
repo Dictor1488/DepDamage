@@ -14,6 +14,8 @@ package com.flyingdamage
         private var _hpBefore:int;
         private var _hpMax:int;
 
+        // Same marker geometry as the original HealthBar: 70px bar and splash
+        // anchored at the current HP position, then stretched over lost HP delta.
         public static const LIFETIME:Number = 0.65;
         public static const BAR_WIDTH:Number = 70.0;
         public static const BAR_HEIGHT:Number = 4.0;
@@ -33,11 +35,11 @@ package com.flyingdamage
             mouseChildren = false;
 
             _bar = new Sprite();
-            _bar.filters = [ new GlowFilter(0x000000, 0.9, 3, 3, 2, 2), new GlowFilter(_color, 0.45, 7, 4, 1.0, 1) ];
+            _bar.filters = [new GlowFilter(0x000000, 0.9, 3, 3, 2, 2), new GlowFilter(_color, 0.45, 7, 4, 1.0, 1)];
             addChild(_bar);
 
             _shine = new Sprite();
-            _shine.filters = [ new GlowFilter(0xFFFFFF, 0.65, 4, 4, 1.2, 1) ];
+            _shine.filters = [new GlowFilter(0xFFFFFF, 0.65, 4, 4, 1.2, 1)];
             addChild(_shine);
 
             draw(1.0);
@@ -96,14 +98,7 @@ package com.flyingdamage
 
         private function normalizeColor(c:uint):uint
         {
-            c = c & 0xFFFFFF;
-            var r:int = (c >> 16) & 0xFF;
-            var g:int = (c >> 8) & 0xFF;
-            var b:int = c & 0xFF;
-            if (r > 220 && g > 190 && b < 100) return 0xFFDC3C;
-            if (r > 200 && g < 130 && b < 130) return 0xFF4C4C;
-            if (g > 170 && r < 170) return 0x7CFF4C;
-            return 0xFFDC3C;
+            return VehicleMarkerFlags.getColorRGB(VehicleMarkerFlags.getColorNameFromRGB(c));
         }
 
         private function clamp01(v:Number):Number
