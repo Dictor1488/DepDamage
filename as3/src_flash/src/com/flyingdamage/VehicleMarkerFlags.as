@@ -19,17 +19,19 @@ package com.flyingdamage
         public static const DAMAGE_FROM_PLAYER_FLAG:uint = 2;
 
         public static const ALL_DAMAGE_TYPES:Array = [DAMAGE_SHOT, DAMAGE_FIRE, DAMAGE_RAMMING, DAMAGE_WORLD_COLLISION, DAMAGE_DEATH_ZONE, DAMAGE_DROWNING, DAMAGE_EXPLOSION];
-        public static const ALLOWED_DAMAGE_TYPES:Array = [DAMAGE_FIRE, DAMAGE_EXPLOSION];
+        public static const ALLOWED_DAMAGE_TYPES:Array = [DAMAGE_SHOT, DAMAGE_FIRE, DAMAGE_RAMMING, DAMAGE_WORLD_COLLISION, DAMAGE_DEATH_ZONE, DAMAGE_DROWNING, DAMAGE_EXPLOSION];
         public static const LABELED_DAMAGE_TYPES:Array = [DAMAGE_BLOCKED, DAMAGE_BLOCKED_CRIT, DAMAGE_RICOCHET];
 
         public static function checkLabeledDamages(damageType:String):Boolean
         {
-            return damageType == null || damageType == "" || LABELED_DAMAGE_TYPES.indexOf(damageType) != -1;
+            return damageType != null && damageType != "" && LABELED_DAMAGE_TYPES.indexOf(damageType) != -1;
         }
 
         public static function checkAllowedDamages(damageType:String):Boolean
         {
-            return damageType == null || damageType == "" || ALLOWED_DAMAGE_TYPES.indexOf(damageType) != -1;
+            if (damageType == null || damageType == "")
+                return true;
+            return ALLOWED_DAMAGE_TYPES.indexOf(damageType) != -1 || LABELED_DAMAGE_TYPES.indexOf(damageType) != -1;
         }
 
         public static function getDamageColorName(source:uint, markerColor:String = "red"):String
