@@ -5,14 +5,12 @@ package com.flyingdamage
     public class DamageLayer extends Sprite
     {
         private var _app:FlyingDamageApp;
-        private var _items:Vector.<FloatingNumber>;
-        private var _splashes:Vector.<HpSplash>;
+        private var _markers:Object;
 
         public function DamageLayer(app:FlyingDamageApp)
         {
             _app = app;
-            _items = new Vector.<FloatingNumber>();
-            _splashes = new Vector.<HpSplash>();
+            _markers = {};
             mouseEnabled = false;
             mouseChildren = false;
         }
@@ -22,71 +20,58 @@ package com.flyingdamage
             if (damage <= 0)
                 return;
 
-            var colorName:String = VehicleMarkerFlags.getDamageColorName(sourceFlag, "red");
-            var markerColor:uint = VehicleMarkerFlags.getColorRGB(colorName);
-            var finalColor:uint = colorRGB != 0 ? colorRGB : markerColor;
+            var marker:VehicleMarkerCore = getMarker(vehicleID);
+            marker.setMarkerSnapshot(startX, startY, hasStart);
+            marker.updateHealth(damage, colorRGB, hasHp, hpCur, hpBefore, hpMax);
+            marker.addDamageLabel(damage, colorRGB, fontSize, alpha, sourceFlag, damageType);
+        }
 
-            var splash:HpSplash = new HpSplash(vehicleID, damage, finalColor, startX, startY, hasStart, hasHp, hpCur, hpBefore, hpMax);
-            addChild(splash);
-            _splashes.push(splash);
-
-            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, finalColor, fontSize, alpha, startX, startY, hasStart);
-            addChild(fn);
-            _items.push(fn);
+        private function getMarker(vehicleID:String):VehicleMarkerCore
+        {
+            var marker:VehicleMarkerCore = _markers[vehicleID] as VehicleMarkerCore;
+            if (marker == null)
+            {
+                marker = new VehicleMarkerCore(vehicleID);
+                _markers[vehicleID] = marker;
+                addChild(marker);
+            }
+            return marker;
         }
 
         public function clearAll():void
         {
-            for each (var fn:FloatingNumber in _items)
+            for each (var marker:VehicleMarkerCore in _markers)
             {
-                if (fn.parent != null)
-                    fn.parent.removeChild(fn);
-                fn.dispose();
+                if (marker.parent != null)
+                    marker.parent.removeChild(marker);
+                marker.dispose();
             }
-            _items = new Vector.<FloatingNumber>();
-
-            for each (var sp:HpSplash in _splashes)
-            {
-                if (sp.parent != null)
-                    sp.parent.removeChild(sp);
-                sp.dispose();
-            }
-            _splashes = new Vector.<HpSplash>();
+            _markers = {};
         }
 
         public function tick():int
         {
-            var survivors:Vector.<FloatingNumber> = new Vector.<FloatingNumber>();
-            for each (var fn:FloatingNumber in _items)
+            var count:int = 0;
+            for (var id:String in _markers)
             {
-                var pos:Object = _app.getScreenPos(fn.vehicleID);
-                if (fn.update(pos))
-                    survivors.push(fn);
+                var marker:VehicleMarkerCore = _markers[id] as VehicleMarkerCore;
+                if (marker == null)
+                {
+                    delete _markers[id];
+                    continue;
+                }
+                var pos:Object = _app.getScreenPos(marker.vehicleID);
+                if (marker.tick(pos))
+                    count++;
                 else
                 {
-                    if (fn.parent != null)
-                        fn.parent.removeChild(fn);
-                    fn.dispose();
+                    if (marker.parent != null)
+                        marker.parent.removeChild(marker);
+                    marker.dispose();
+                    delete _markers[id];
                 }
             }
-            _items = survivors;
-
-            var splashSurvivors:Vector.<HpSplash> = new Vector.<HpSplash>();
-            for each (var sp:HpSplash in _splashes)
-            {
-                var spos:Object = _app.getScreenPos(sp.vehicleID);
-                if (sp.update(spos))
-                    splashSurvivors.push(sp);
-                else
-                {
-                    if (sp.parent != null)
-                        sp.parent.removeChild(sp);
-                    sp.dispose();
-                }
-            }
-            _splashes = splashSurvivors;
-
-            return _items.length + _splashes.length;
+            return count;
         }
     }
 }
