@@ -173,6 +173,7 @@ class Controller(object):
             return
         hasStart, sx, sy = self._getStartPoint(vehicleID)
         hasHp, hpCur, hpBefore, hpMax = self._getHpData(vehicleID, damage)
+        sourceFlag = 2 if (int(colorRGB) & 0xFFFFFF) == 0xFFDC3C else 0
         item = {
             'vid': str(int(vehicleID)),
             'dmg': int(damage),
@@ -186,11 +187,13 @@ class Controller(object):
             'hpCur': int(hpCur),
             'hpBefore': int(hpBefore),
             'hpMax': int(hpMax),
+            'sourceFlag': int(sourceFlag),
+            'damageType': 'shot',
         }
         state.queue.append(item)
         if self._logN < 100:
             self._logN += 1
-            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, int(colorRGB) & 0xFFFFFF, len(state.queue))
+            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, 'shot', int(colorRGB) & 0xFFFFFF, len(state.queue))
         self._createFlash()
 
 
