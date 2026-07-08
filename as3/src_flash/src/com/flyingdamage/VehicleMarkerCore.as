@@ -41,15 +41,17 @@ package com.flyingdamage
         {
             if (!ok)
                 return;
-            if (!_hasMarker)
-            {
-                _markerX = xPos;
-                _markerY = yPos;
-                _hasMarker = true;
-                x = _markerX;
-                y = _markerY;
-                visible = true;
-            }
+            setMarkerPosition(xPos, yPos);
+        }
+
+        private function setMarkerPosition(xPos:Number, yPos:Number):void
+        {
+            _markerX = xPos;
+            _markerY = yPos;
+            _hasMarker = true;
+            x = _markerX;
+            y = _markerY;
+            visible = true;
         }
 
         public function addDamageLabel(damage:int, colorRGB:uint, fontSize:int, alpha:Number, sourceFlag:uint, damageType:String):void
@@ -79,8 +81,11 @@ package com.flyingdamage
 
         public function tick(pos:Object):Boolean
         {
-            if (!_hasMarker && pos != null && pos.ok)
-                setMarkerSnapshot(Number(pos.x), Number(pos.y), true);
+            // Bind the marker core to the live vehicle marker position every frame.
+            // Previous builds only used the first snapshot and then kept x/y frozen,
+            // so the number stayed on the screen while the camera/tank moved.
+            if (pos != null && pos.ok)
+                setMarkerPosition(Number(pos.x), Number(pos.y));
 
             if (!_hasMarker)
             {
