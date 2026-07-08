@@ -12,7 +12,7 @@
     "info": {
         "id": "com.author.flyingdamage",
         "name": "Flying Damage",
-        "description": "Resource patch: provided vmApplication.swf is packaged as gui/flash/battleVehicleMarkersApp.swf. No overlay renderer or Python damage hooks.",
-        "version": "4.0.1"
+        "description": "AS3 source based vehicle marker damage logic. No FlyingDamageApp overlay and no binary SWF replacement committed.",
+        "version": "4.0.2"
     }
 }
