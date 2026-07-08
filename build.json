@@ -12,7 +12,7 @@
     "info": {
         "id": "com.author.flyingdamage",
         "name": "Flying Damage",
-        "description": "Uses native VehicleMarker.addDamageLabel damage numbers bound to the real tank marker. No FlyingDamageApp overlay renderer.",
-        "version": "3.3.1"
+        "description": "Resource patch: provided vmApplication.swf is packaged as gui/flash/battleVehicleMarkersApp.swf. No overlay renderer or Python damage hooks.",
+        "version": "4.0.1"
     }
 }
