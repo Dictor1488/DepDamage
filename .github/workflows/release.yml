@@ -55,11 +55,33 @@ jobs:
           python -m pip install --upgrade pip
           pip install psutil
 
+      - name: Cache Flex SDK
+        id: cache-flex
+        uses: actions/cache@v4
+        with:
+          path: C:\flex-sdk
+          key: flex-sdk-${{ env.FLEX_VERSION }}-${{ env.FLASH_PLAYER_VERSION }}-swf${{ env.SWF_VERSION }}-v1
+
       - name: Download Flex SDK
+        if: steps.cache-flex.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $url = "https://archive.apache.org/dist/flex/$env:FLEX_VERSION/binaries/apache-flex-sdk-$env:FLEX_VERSION-bin.zip"
-          Invoke-WebRequest -Uri $url -OutFile flex-sdk.zip -UseBasicParsing -TimeoutSec 300
+          $urls = @(
+            "https://archive.apache.org/dist/flex/$env:FLEX_VERSION/binaries/apache-flex-sdk-$env:FLEX_VERSION-bin.zip",
+            "https://dlcdn.apache.org/flex/$env:FLEX_VERSION/binaries/apache-flex-sdk-$env:FLEX_VERSION-bin.zip"
+          )
+          $downloaded = $false
+          foreach ($url in $urls) {
+            try {
+              Write-Host "Downloading Flex SDK from $url"
+              Invoke-WebRequest -Uri $url -OutFile flex-sdk.zip -UseBasicParsing -TimeoutSec 300
+              $downloaded = $true
+              break
+            } catch {
+              Write-Host "Failed: $_"
+            }
+          }
+          if (-not $downloaded) { throw 'Could not download Flex SDK' }
           New-Item -ItemType Directory -Force -Path C:\flex-sdk | Out-Null
           Expand-Archive -Path flex-sdk.zip -DestinationPath C:\flex-sdk-temp -Force
           $items = Get-ChildItem C:\flex-sdk-temp
