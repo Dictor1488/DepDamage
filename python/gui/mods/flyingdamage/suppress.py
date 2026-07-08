@@ -1,13 +1,7 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# UNIFIED approach (user's idea): intercept _updateHealthMarker (the exact call
-# that draws the standard floating damage). From it we:
-#   1) compute the damage (previous health - new health for this vehicle),
-#   2) feed OUR SWF so our number shows exactly when the game's would,
-#   3) suppress the standard number by updating only the health bar via the
-#      plain _setHealthMarker setter.
-# This guarantees our number appears whenever a standard one would, and the
-# standard one never shows.
+# Intercept _updateHealthMarker, feed our AS3 renderer, and optionally suppress
+# the standard floating damage number.
 
 import sys
 import logging
@@ -25,7 +19,9 @@ _SKIP = ('flyingdamage',)
 _TARGET = '_updateHealthMarker'
 
 _lastHealth = {}          # vehicleID -> last known health
-_feedCallback = [None]    # set by controller: fn(vehicleID, damage)
+_feedCallback = [None]    # set by controller: fn(vehicleID, damage, damageType)
+
+_LABELED_TYPES = ('blocked', 'blocked_crit', 'ricochet')
 
 
 def setFeed(fn):
@@ -74,9 +70,6 @@ def installSuppression():
                 logger.info('[FlyingDamage] hooked %s.%s (%s)', attr, _TARGET, modName)
             except Exception:
                 logger.info('[FlyingDamage] hook fail %s', attr, exc_info=True)
-            # Also hook start(): create+activate the flash here, in the marker
-            # plugin lifecycle (this is where DistanceMarker does it, which is
-            # why its component becomes live and ticks).
             if 'start' in cls.__dict__:
                 try:
                     override(cls, 'start', _pluginStartHook)
@@ -107,9 +100,8 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
             index = args[1]
             newHealth = args[2]
             reason = args[4] if len(args) >= 5 else None
+            damageType = _reasonToDamageType(reason, args, kwargs)
 
-            # Baseline previous health. On first sight, seed from the vehicle's
-            # max health so the first hit isn't lost (delta would be 0).
             if vehID in _lastHealth:
                 prev = _lastHealth[vehID]
             else:
@@ -120,14 +112,18 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
                 damage = 0
             _lastHealth[vehID] = newHealth
 
-            if _logN[0] < 15:
+            if _logN[0] < 80:
                 _logN[0] += 1
-                logger.info('[FlyingDamage] HM veh=%s new=%s dmg=%s reason=%s',
-                            vehID, newHealth, damage, repr(reason))
+                logger.info('[FlyingDamage] HM veh=%s new=%s dmg=%s reason=%s dtype=%s args=%s',
+                            vehID, newHealth, damage, repr(reason), damageType, _compactArgs(args))
 
-            # Feed our SWF (controller decides my-damage / color / projection).
-            if damage > 0 and _feedCallback[0] is not None:
+            # Feed normal damage and also 0-damage labeled events like BLOCK/RICOCHET
+            # if WG sends them through the same marker method.
+            if (damage > 0 or damageType in _LABELED_TYPES) and _feedCallback[0] is not None:
                 try:
+                    _feedCallback[0](vehID, damage, damageType)
+                except TypeError:
+                    # Backward compatibility with older callback signature.
                     _feedCallback[0](vehID, damage)
                 except Exception:
                     logger.error('[FlyingDamage] feed failed', exc_info=True)
@@ -141,6 +137,68 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
         logger.error('[FlyingDamage] HM hook error', exc_info=True)
 
     return base(self, *args, **kwargs)
+
+
+def _reasonToDamageType(reason, args=None, kwargs=None):
+    try:
+        text = ''
+        if reason is not None:
+            text = str(reason).lower()
+        # Named/enum string cases.
+        if 'ricochet' in text:
+            return 'ricochet'
+        if 'block' in text and 'crit' in text:
+            return 'blocked_crit'
+        if 'block' in text or 'armor' in text or 'absorbed' in text:
+            return 'blocked'
+        if 'fire' in text or 'burn' in text:
+            return 'fire'
+        if 'ram' in text:
+            return 'ramming'
+        if 'collision' in text:
+            return 'world_collision'
+        if 'death_zone' in text or 'deathzone' in text:
+            return 'death_zone'
+        if 'drown' in text or 'water' in text:
+            return 'drowning'
+        if 'explosion' in text or 'ammo' in text or 'blow' in text:
+            return 'explosion'
+
+        # Numeric fallback. These ids can differ between WG versions, so this is
+        # intentionally conservative; logs keep reason/args for exact mapping fixes.
+        try:
+            rid = int(reason)
+        except Exception:
+            rid = None
+        if rid is not None:
+            if rid in (2, 16):
+                return 'fire'
+            if rid in (3, 17):
+                return 'ramming'
+            if rid in (4, 18):
+                return 'world_collision'
+            if rid in (5, 19):
+                return 'death_zone'
+            if rid in (6, 20):
+                return 'drowning'
+            if rid in (7, 21):
+                return 'explosion'
+    except Exception:
+        pass
+    return 'shot'
+
+
+def _compactArgs(args):
+    try:
+        out = []
+        for a in args[:8]:
+            s = repr(a)
+            if len(s) > 90:
+                s = s[:87] + '...'
+            out.append(s)
+        return '(' + ', '.join(out) + ')'
+    except Exception:
+        return '<args>'
 
 
 def _maxHealth(vehID, fallback):
