@@ -4,6 +4,7 @@ package com.flyingdamage
 
     public class VehicleMarkerCore extends Sprite
     {
+        public var id:String;
         public var vehicleID:String;
 
         private var _markerX:Number = 0;
@@ -14,9 +15,10 @@ package com.flyingdamage
         private var _items:Vector.<FloatingNumber>;
         private var _splashes:Vector.<HpSplash>;
 
-        public function VehicleMarkerCore(vehicleID:String)
+        public function VehicleMarkerCore(id:String, vehicleID:String = null)
         {
-            this.vehicleID = vehicleID;
+            this.id = id;
+            this.vehicleID = vehicleID != null ? vehicleID : id;
             mouseEnabled = false;
             mouseChildren = false;
 
@@ -51,7 +53,7 @@ package com.flyingdamage
 
         public function addDamageLabel(damage:int, colorRGB:uint, fontSize:int, alpha:Number, sourceFlag:uint, damageType:String):void
         {
-            if (damage <= 0)
+            if (damage <= 0 && !VehicleMarkerFlags.checkLabeledDamages(damageType))
                 return;
             if (!VehicleMarkerFlags.checkAllowedDamages(damageType))
                 return;
