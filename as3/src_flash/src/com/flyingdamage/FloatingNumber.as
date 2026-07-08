@@ -18,19 +18,21 @@ package com.flyingdamage
         {
             this.vehicleID = vehicleID;
             _bornAt = getTimer();
-            _damageType = damageType;
+            _damageType = damageType == null ? VehicleMarkerFlags.DAMAGE_SHOT : damageType;
 
-            // Same model as VehicleMarker.as: the damage label is a child of the
-            // marker-local damage container. It does not know screen coordinates.
+            // Adapted from original VehicleMarker.addDamageLabel(): normal damage
+            // labels are independent marker-local children and use the source-based
+            // WoT color map. Labeled events stay text-based because the original
+            // critical/explosion MovieClips are not copied into this minimal SWF.
             if (VehicleMarkerFlags.checkLabeledDamages(_damageType))
             {
                 _labeled = new LabeledDamageLabel(_damageType, fontSize);
                 addChild(_labeled);
                 _anim = new DamageAnimatedLabel(this, _labeled.textField, _labeled.color, baseAlpha, 40.0);
             }
-            else
+            else if (VehicleMarkerFlags.checkAllowedDamageLabel(_damageType))
             {
-                _label = new DamageLabel(damage, fontSize, colorRGB, sourceFlag, damageType);
+                _label = new DamageLabel(damage, fontSize, colorRGB, sourceFlag, _damageType);
                 addChild(_label);
                 _anim = new DamageAnimatedLabel(this, _label.textField, _label.color, baseAlpha, 40.0);
             }
