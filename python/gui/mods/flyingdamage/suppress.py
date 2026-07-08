@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # suppress.py  --  Python 2.7
-# Intercept _updateHealthMarker, feed our AS3 renderer, and optionally suppress
-# the standard floating damage number.
+# Hook _updateHealthMarker only for debug/tracking. Damage rendering is left to
+# the native VehicleMarker implementation, so original addDamageLabel() runs.
 
 import sys
 import logging
@@ -9,7 +9,6 @@ import logging
 import BigWorld
 
 from .utils import override
-from .settings.config import g_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +19,12 @@ _SKIP = ('flyingdamage',)
 _TARGET = '_updateHealthMarker'
 
 _lastHealth = {}          # vehicleID -> last known health
-_feedCallback = [None]    # set by controller: fn(vehicleID, damage, damageType)
-
-_LABELED_TYPES = ('blocked', 'blocked_crit', 'ricochet')
+_feedCallback = [None]    # kept for compatibility; native path does not use it
 
 
 def setFeed(fn):
-    _feedCallback[0] = fn
+    # Native VehicleMarker path: do not feed damage into FlyingDamageApp overlay.
+    _feedCallback[0] = None
 
 
 def resetState():
@@ -69,7 +67,7 @@ def installSuppression():
             try:
                 override(cls, _TARGET, _updateHealthMarkerHook)
                 hooked += 1
-                logger.info('[FlyingDamage] hooked %s.%s (%s)', attr, _TARGET, modName)
+                logger.info('[FlyingDamage] hooked %s.%s native VehicleMarker path (%s)', attr, _TARGET, modName)
             except Exception:
                 logger.info('[FlyingDamage] hook fail %s', attr, exc_info=True)
             if 'start' in cls.__dict__:
@@ -79,7 +77,7 @@ def installSuppression():
                 except Exception:
                     pass
 
-    logger.info('[FlyingDamage] _updateHealthMarker hooks: %d debugLimit=%d', hooked, _DEBUG_LOG_LIMIT)
+    logger.info('[FlyingDamage] _updateHealthMarker hooks: %d debugLimit=%d nativeAddDamageLabel=True', hooked, _DEBUG_LOG_LIMIT)
     if hooked > 0:
         _installed[0] = True
 
@@ -96,6 +94,9 @@ def _pluginStartHook(base, self, *args, **kwargs):
 
 def _updateHealthMarkerHook(base, self, *args, **kwargs):
     # Observed signature: (vehicleID, index, newHealth, aInfo, attackReason, extId)
+    # Important: always return base(...). That keeps WG's original
+    # VehicleMarker._updateHealthMarker/addDamageLabel logic alive and bound to
+    # the real tank marker. We only log/debug here.
     try:
         if len(args) >= 3:
             vehID = args[0]
@@ -118,34 +119,18 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
 
             if _logN[0] < _DEBUG_LOG_LIMIT:
                 _logN[0] += 1
-                logger.info('[FD_DEBUG_HM] n=%d veh=%s index=%s prev=%s new=%s dmg=%s dtype=%s',
+                logger.info('[FD_DEBUG_HM_NATIVE] n=%d veh=%s index=%s prev=%s new=%s dmg=%s dtype=%s',
                             _logN[0], vehID, index, prev, newHealth, damage, damageType)
-                logger.info('[FD_DEBUG_HM] reason type=%s repr=%s int=%s text=%s',
+                logger.info('[FD_DEBUG_HM_NATIVE] reason type=%s repr=%s int=%s text=%s',
                             _safeType(reason), _safeRepr(reason, 240), _safeInt(reason), _safeText(reason, 240))
-                logger.info('[FD_DEBUG_HM] aInfo type=%s repr=%s attrs=%s',
+                logger.info('[FD_DEBUG_HM_NATIVE] aInfo type=%s repr=%s attrs=%s',
                             _safeType(aInfo), _safeRepr(aInfo, 320), _dumpInterestingAttrs(aInfo))
-                logger.info('[FD_DEBUG_HM] extId type=%s repr=%s int=%s text=%s',
+                logger.info('[FD_DEBUG_HM_NATIVE] extId type=%s repr=%s int=%s text=%s',
                             _safeType(extId), _safeRepr(extId, 240), _safeInt(extId), _safeText(extId, 240))
-                logger.info('[FD_DEBUG_HM] argsFull=%s kwargs=%s',
+                logger.info('[FD_DEBUG_HM_NATIVE] argsFull=%s kwargs=%s',
                             _compactArgs(args, 12, 220), _compactKwargs(kwargs))
-
-            # Feed normal damage and also 0-damage labeled events like BLOCK/RICOCHET
-            # if WG sends them through the same marker method.
-            if (damage > 0 or damageType in _LABELED_TYPES) and _feedCallback[0] is not None:
-                try:
-                    _feedCallback[0](vehID, damage, damageType)
-                except TypeError:
-                    _feedCallback[0](vehID, damage)
-                except Exception:
-                    logger.error('[FlyingDamage] feed failed', exc_info=True)
-
-            # Suppress standard number: update only the health bar.
-            if g_config.hideStandard:
-                setter = getattr(self, '_setHealthMarker', None)
-                if setter is not None:
-                    return setter(vehID, index, newHealth)
     except Exception:
-        logger.error('[FlyingDamage] HM hook error', exc_info=True)
+        logger.error('[FlyingDamage] HM native hook debug error', exc_info=True)
 
     return base(self, *args, **kwargs)
 
