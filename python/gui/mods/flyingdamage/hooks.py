@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 # hooks.py  --  Python 2.7
 # Damage from health marker hook. Feed AS3 renderer with vehicle id.
-# AS3 follows the vehicle marker position and applies marker-local damage offsets.
 
 import logging
 
@@ -17,7 +16,6 @@ logger = logging.getLogger(__name__)
 _ANCHOR_UP = 4.5
 _MARKER_Y_OFFSET = 0.0
 _PLAYER_DAMAGE_COLOR = 0xFFDC3C
-_MERGE_WINDOW = 0.09
 _ctrlRef = [None]
 _pending = {}
 _callbacks = {}
@@ -44,6 +42,7 @@ def resetState():
     _feedCallbacks.clear()
     _feedPending.clear()
     _feedMine.clear()
+    _feedTypes.clear()
     _lastAttacker.clear()
 
 
@@ -120,18 +119,24 @@ def isMyDamage(vid):
 
 _feedPending = {}
 _feedMine = {}
+_feedTypes = {}
 _feedCallbacks = {}
 _FEED_MERGE = 0.09
 _feedLog = [0]
 _projCallLog = [0]
+_LABELED_TYPES = ('blocked', 'blocked_crit', 'ricochet')
 
 
-def showDamageForVehicle(vid, damage):
-    if not g_config.enabled or damage <= 0:
+def showDamageForVehicle(vid, damage, damageType='shot'):
+    if not g_config.enabled:
+        return
+    damageType = damageType or 'shot'
+    if damage <= 0 and damageType not in _LABELED_TYPES:
         return
     myDamage = isMyDamage(vid)
-    _feedPending[vid] = _feedPending.get(vid, 0) + damage
+    _feedPending[vid] = _feedPending.get(vid, 0) + max(0, damage)
     _feedMine[vid] = _feedMine.get(vid, False) or myDamage
+    _feedTypes[vid] = _mergeDamageType(_feedTypes.get(vid, 'shot'), damageType)
     if vid not in _feedCallbacks:
         _feedCallbacks[vid] = BigWorld.callback(_FEED_MERGE, lambda: _feedFlush(vid))
 
@@ -140,13 +145,14 @@ def _feedFlush(vid):
     _feedCallbacks.pop(vid, None)
     damage = _feedPending.pop(vid, 0)
     myDamage = _feedMine.pop(vid, False)
-    if damage <= 0:
+    damageType = _feedTypes.pop(vid, 'shot')
+    if damage <= 0 and damageType not in _LABELED_TYPES:
         return
     ctrl = _ctrlRef[0]
     if ctrl is None:
         if _feedLog[0] < 20:
             _feedLog[0] += 1
-            logger.info('[FlyingDamageGF] feedFlush: ctrl is None dmg=%d', damage)
+            logger.info('[FlyingDamageGF] feedFlush: ctrl is None dmg=%d type=%s', damage, damageType)
         return
     vehicle = BigWorld.entity(vid)
     if vehicle is None:
@@ -161,10 +167,29 @@ def _feedFlush(vid):
         return
     isEnemy = _isEnemy(vehicle, vid)
     color = _PLAYER_DAMAGE_COLOR if myDamage else g_config.colorForTeam(isEnemy)
-    if _feedLog[0] < 80:
+    if _feedLog[0] < 100:
         _feedLog[0] += 1
-        logger.info('[FlyingDamageGF] feedFlush -> AS3 marker-anchored showDamage vid=%s dmg=%d mine=%s color=0x%06X', vid, damage, myDamage, color)
-    ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0)
+        logger.info('[FlyingDamageGF] feedFlush -> AS3 showDamage vid=%s dmg=%d type=%s mine=%s color=0x%06X', vid, damage, damageType, myDamage, color)
+    try:
+        ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0, damageType)
+    except TypeError:
+        ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0)
+
+
+def _mergeDamageType(oldType, newType):
+    priority = {
+        'blocked_crit': 100,
+        'ricochet': 90,
+        'blocked': 80,
+        'explosion': 70,
+        'fire': 60,
+        'ramming': 50,
+        'world_collision': 40,
+        'death_zone': 30,
+        'drowning': 20,
+        'shot': 10,
+    }
+    return newType if priority.get(newType, 0) >= priority.get(oldType, 0) else oldType
 
 
 def projectVehicleScreen(vid, quiet=False):
