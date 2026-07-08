@@ -56,7 +56,11 @@ package com.flyingdamage
         {
             if (damage <= 0 && !VehicleMarkerFlags.checkLabeledDamages(damageType))
                 return;
-            if (!VehicleMarkerFlags.checkAllowedDamages(damageType))
+
+            // Normal shot damage must be allowed here. VehicleMarkerFlags.checkAllowedDamages()
+            // is the original hit-effect filter and only includes fire/explosion, so using it
+            // here hides regular damage numbers. Use the label-specific filter instead.
+            if (!VehicleMarkerFlags.checkAllowedDamageLabel(damageType))
                 return;
 
             var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha, sourceFlag, damageType);
@@ -66,11 +70,11 @@ package com.flyingdamage
 
         public function updateHealth(damage:int, colorRGB:uint, hasHp:Boolean, hpCur:int, hpBefore:int, hpMax:int):void
         {
-            if (damage <= 0)
-                return;
-            var sp:HpSplash = new HpSplash(vehicleID, damage, colorRGB, hasHp, hpCur, hpBefore, hpMax);
-            _hpContainer.addChild(sp);
-            _splashes.push(sp);
+            // Temporarily disabled: without the real WoT HealthBar MovieClip anchor the
+            // splash is drawn relative to our marker root and can fly to the side.
+            // Damage numbers remain active; HP splash can be re-enabled after exact
+            // health-bar anchoring is ported.
+            return;
         }
 
         public function tick(pos:Object):Boolean
