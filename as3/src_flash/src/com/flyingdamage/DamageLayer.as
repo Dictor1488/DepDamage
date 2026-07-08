@@ -5,73 +5,61 @@ package com.flyingdamage
     public class DamageLayer extends Sprite
     {
         private var _app:FlyingDamageApp;
-        private var _markers:Object;
+        private var _events:Vector.<VehicleMarkerCore>;
+        private var _eventSeq:int = 0;
 
         public function DamageLayer(app:FlyingDamageApp)
         {
             _app = app;
-            _markers = {};
+            _events = new Vector.<VehicleMarkerCore>();
             mouseEnabled = false;
             mouseChildren = false;
         }
 
         public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false, hasHp:Boolean = false, hpCur:int = 0, hpBefore:int = 0, hpMax:int = 0, sourceFlag:uint = 0, damageType:String = "shot"):void
         {
-            if (damage <= 0)
+            if (damage <= 0 && !VehicleMarkerFlags.checkLabeledDamages(damageType))
                 return;
 
-            var marker:VehicleMarkerCore = getMarker(vehicleID);
+            // Important: create a separate marker-local core for every damage event.
+            // Reusing one core per vehicle makes old labels jump when a later hit on
+            // the same tank updates the container position.
+            var marker:VehicleMarkerCore = new VehicleMarkerCore(vehicleID + "#" + (_eventSeq++), vehicleID);
             marker.setMarkerSnapshot(startX, startY, hasStart);
             marker.updateHealth(damage, colorRGB, hasHp, hpCur, hpBefore, hpMax);
             marker.addDamageLabel(damage, colorRGB, fontSize, alpha, sourceFlag, damageType);
-        }
-
-        private function getMarker(vehicleID:String):VehicleMarkerCore
-        {
-            var marker:VehicleMarkerCore = _markers[vehicleID] as VehicleMarkerCore;
-            if (marker == null)
-            {
-                marker = new VehicleMarkerCore(vehicleID);
-                _markers[vehicleID] = marker;
-                addChild(marker);
-            }
-            return marker;
+            addChild(marker);
+            _events.push(marker);
         }
 
         public function clearAll():void
         {
-            for each (var marker:VehicleMarkerCore in _markers)
+            for each (var marker:VehicleMarkerCore in _events)
             {
                 if (marker.parent != null)
                     marker.parent.removeChild(marker);
                 marker.dispose();
             }
-            _markers = {};
+            _events = new Vector.<VehicleMarkerCore>();
         }
 
         public function tick():int
         {
-            var count:int = 0;
-            for (var id:String in _markers)
+            var survivors:Vector.<VehicleMarkerCore> = new Vector.<VehicleMarkerCore>();
+            for each (var marker:VehicleMarkerCore in _events)
             {
-                var marker:VehicleMarkerCore = _markers[id] as VehicleMarkerCore;
-                if (marker == null)
-                {
-                    delete _markers[id];
-                    continue;
-                }
                 var pos:Object = _app.getScreenPos(marker.vehicleID);
                 if (marker.tick(pos))
-                    count++;
+                    survivors.push(marker);
                 else
                 {
                     if (marker.parent != null)
                         marker.parent.removeChild(marker);
                     marker.dispose();
-                    delete _markers[id];
                 }
             }
-            return count;
+            _events = survivors;
+            return _events.length;
         }
     }
 }
