@@ -77,8 +77,10 @@ package com.flyingdamage
                             var hpCur:int = hasHp ? int(d.hpCur) : 0;
                             var hpBefore:int = hasHp ? int(d.hpBefore) : 0;
                             var hpMax:int = hasHp ? int(d.hpMax) : 0;
-                            log("recv vid=" + d.vid + " dmg=" + d.dmg + " hasStart=" + hasStart + " hasHp=" + hasHp);
-                            _layer.showDamage(String(d.vid), int(d.dmg), uint(d.color), int(d.size), Number(d.alpha), sx, sy, hasStart, hasHp, hpCur, hpBefore, hpMax);
+                            var sourceFlag:uint = d.sourceFlag != null ? uint(d.sourceFlag) : VehicleMarkerFlags.DAMAGE_FROM_OTHER_FLAG;
+                            var damageType:String = d.damageType != null ? String(d.damageType) : VehicleMarkerFlags.DAMAGE_SHOT;
+                            log("recv vid=" + d.vid + " dmg=" + d.dmg + " hasStart=" + hasStart + " hasHp=" + hasHp + " source=" + sourceFlag + " type=" + damageType);
+                            _layer.showDamage(String(d.vid), int(d.dmg), uint(d.color), int(d.size), Number(d.alpha), sx, sy, hasStart, hasHp, hpCur, hpBefore, hpMax, sourceFlag, damageType);
                         }
                     }
                 }
