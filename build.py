@@ -5,7 +5,7 @@ Build script for creating and packaging World of Tanks modifications.
 
 Current project mode:
 - Python entry point is only a lightweight mod marker.
-- AS3 source for vehicle markers is built into battleVehicleMarkersApp.swf.
+- Full AS3 source for vehicle markers is built into battleVehicleMarkersApp.swf.
 - No old Gameface files, no prebuilt old SWF, no FlyingDamageApp overlay path.
 """
 
@@ -135,9 +135,9 @@ def _mxmlc_path(config: AppConfig) -> Optional[str]:
 
 def build_as3_vehicle_markers(config: AppConfig, args: argparse.Namespace) -> None:
     src_root = pathlib.Path('as3/src_flash/src')
-    app_file = src_root / 'App.as'
+    app_file = src_root / 'net/wg/app/impl/BattleVehicleMarkersApp.as'
     if not app_file.is_file():
-        logger.info('No AS3 marker source found: %s', app_file)
+        logger.info('No AS3 marker root found: %s', app_file)
         return
 
     output = pathlib.Path('as3/bin/battleVehicleMarkersApp.swf')
@@ -155,6 +155,7 @@ def build_as3_vehicle_markers(config: AppConfig, args: argparse.Namespace) -> No
         str(app_file),
     ]
     logger.info('Building AS3 marker SWF: %s', output)
+    logger.info('mxmlc root class: %s', app_file)
     logger.info('mxmlc command: %s', ' '.join(cmd))
     subprocess.check_call(cmd)
     logger.info('AS3 marker SWF built: %s', output)
