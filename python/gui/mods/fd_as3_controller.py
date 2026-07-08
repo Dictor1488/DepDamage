@@ -9,17 +9,15 @@ from gui.mods.fd_as3_flash import FlyingDamageFlash
 
 logger = logging.getLogger(__name__)
 _LABELED_TYPES = ('blocked', 'blocked_crit', 'ricochet')
-_CLOSE_DELAY = 2.35
-_MAX_FLASHES = 16
 
 
 class Controller(object):
 
     def __init__(self):
         self._battleMode = False
-        self._flashes = []
-        self._closeCbs = []
+        self._flash = None
         self._logN = 0
+        self._pollLogN = 0
 
     def init(self):
         logger.info('[FD_AS3] controller init')
@@ -52,7 +50,7 @@ class Controller(object):
         except Exception:
             pass
         self._battleMode = False
-        self._destroyAllFlash(True)
+        self._destroyFlash(True)
         try:
             from flyingdamage.utils import restore_overrides
             restore_overrides()
@@ -63,6 +61,7 @@ class Controller(object):
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
         self._logN = 0
+        self._pollLogN = 0
         del state.queue[:]
         logger.info('[FD_AS3] avatar ready')
         BigWorld.callback(3.0, self._installSuppressionSafe)
@@ -87,57 +86,43 @@ class Controller(object):
             setView(self)
         except Exception:
             pass
+        self._ensureFlash(False)
 
-    def _destroyAllFlash(self, clearQueue=False):
+    def _destroyFlash(self, clearQueue=False):
         if clearQueue:
             del state.queue[:]
-        for cb in list(self._closeCbs):
+        if self._flash is not None:
             try:
-                BigWorld.cancelCallback(cb)
+                self._flash.close()
             except Exception:
-                pass
-        self._closeCbs = []
-        for flash in list(self._flashes):
-            self._closeFlash(flash)
-        self._flashes = []
+                logger.info('[FD_AS3] flash close non fatal', exc_info=True)
+            self._flash = None
 
-    def _closeFlash(self, flash):
-        try:
-            if flash in self._flashes:
-                self._flashes.remove(flash)
-        except Exception:
-            pass
-        try:
-            flash.close()
-        except Exception:
-            pass
-
-    def _closeLater(self, flash):
-        try:
-            self._closeFlash(flash)
-        except Exception:
-            pass
-
-    def _createFlashForQueue(self):
-        if not self._battleMode or not state.queue:
+    def _ensureFlash(self, forcePopulate=False):
+        if not self._battleMode:
+            return
+        if self._flash is not None:
+            if forcePopulate:
+                try:
+                    if self._pollLogN < 120:
+                        self._pollLogN += 1
+                        logger.info('[FD_AS3] poll persistent flash q=%s', len(state.queue))
+                    self._flash.as_populate()
+                except Exception:
+                    logger.error('[FD_AS3] poll persistent flash failed', exc_info=True)
             return
         try:
-            while len(self._flashes) >= _MAX_FLASHES:
-                old = self._flashes.pop(0)
-                self._closeFlash(old)
-            flash = FlyingDamageFlash()
-            self._flashes.append(flash)
-            flash.activate()
-            cb = BigWorld.callback(_CLOSE_DELAY, lambda f=flash: self._closeLater(f))
-            self._closeCbs.append(cb)
-            logger.info('[FD_AS3] flash spawned q=%s active=%s', len(state.queue), len(self._flashes))
+            self._flash = FlyingDamageFlash()
+            self._flash.activate()
+            logger.info('[FD_AS3] flash created persistent q=%s', len(state.queue))
         except Exception:
-            logger.error('[FD_AS3] spawn flash failed', exc_info=True)
+            logger.error('[FD_AS3] create persistent flash failed', exc_info=True)
+            self._flash = None
 
     def _onBattleLeave(self, *a, **kw):
         logger.info('[FD_AS3] battle leave')
         self._battleMode = False
-        self._destroyAllFlash(True)
+        self._destroyFlash(True)
         try:
             from flyingdamage.hooks import resetState
             resetState()
@@ -213,7 +198,7 @@ class Controller(object):
         if self._logN < 120:
             self._logN += 1
             logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, damageType, int(colorRGB) & 0xFFFFFF, len(state.queue))
-        self._createFlashForQueue()
+        self._ensureFlash(True)
 
 
 g_controller = Controller()
