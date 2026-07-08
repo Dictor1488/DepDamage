@@ -14,8 +14,8 @@ package com.flyingdamage
         public var vehicleID:String;
 
         private var _tf:TextField;
+        private var _anim:DamageAnimatedLabel;
         private var _bornAt:int;
-        private var _baseAlpha:Number;
         private var _markerX:Number = 0;
         private var _markerY:Number = 0;
         private var _hasMarker:Boolean = false;
@@ -23,19 +23,10 @@ package com.flyingdamage
         private var _damage:int;
         private var _fontSize:int;
 
-        private static const LIFETIME:Number = 2.0;
-        private static const RISE_PIXELS:Number = 40.0;
-        private static const FADE_START:Number = 0.75;
-        private static const EMERGE_TIME:Number = 0.30;
-        private static const WHITE_TINT_TIME:Number = 0.40;
-        private static const DAMAGE_X_OFFSET:Number = -15.0;
-        private static const DAMAGE_Y_OFFSET:Number = -96.0;
-
         public function FloatingNumber(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, baseAlpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false)
         {
             this.vehicleID = vehicleID;
             _bornAt = getTimer();
-            _baseAlpha = baseAlpha;
             _markerX = startX;
             _markerY = startY;
             _hasMarker = hasStart;
@@ -59,22 +50,18 @@ package com.flyingdamage
             _tf.filters = buildFilters(_targetColor);
             addChild(_tf);
 
-            alpha = _baseAlpha;
-            scaleX = scaleY = 0.82;
+            _anim = new DamageAnimatedLabel(this, _tf, _targetColor, baseAlpha, 40.0);
             visible = _hasMarker;
         }
 
         public function update(pos:Object):Boolean
         {
             var age:Number = (getTimer() - _bornAt) / 1000.0;
-            if (age >= LIFETIME)
+            if (_anim == null || !_anim.isAlive(age))
                 return false;
 
-            var progress:Number = age / LIFETIME;
-
-            // Hit-time snapshot mode: take marker position only once, then do not
-            // follow camera/marker anymore. This prevents the number from flying
-            // across the screen when the camera moves after the hit.
+            // Same visual behavior as copied VehicleMarker logic, but in our AS3 layer:
+            // lock to the hit-time marker snapshot and animate locally from that point.
             if (!_hasMarker && pos != null && pos.ok)
             {
                 _markerX = Number(pos.x);
@@ -89,56 +76,11 @@ package com.flyingdamage
             }
 
             visible = true;
-            x = _markerX + DAMAGE_X_OFFSET;
-            y = _markerY + DAMAGE_Y_OFFSET - RISE_PIXELS * progress;
-
-            applyEmerge(age);
-            applyTint(age);
-            applyFade(progress);
+            x = _markerX + VehicleMarkerDamageLayout.DAMAGE_X;
+            y = _markerY + VehicleMarkerDamageLayout.getDamageLabelOffset(true, true, true, true) + _anim.getYOffset(age);
+            _anim.update(age);
 
             return true;
-        }
-
-        private function applyEmerge(age:Number):void
-        {
-            if (age < EMERGE_TIME)
-            {
-                var p:Number = age / EMERGE_TIME;
-                scaleX = scaleY = 0.82 + 0.18 * easeOut(p);
-            }
-            else
-            {
-                scaleX = scaleY = 1.0;
-            }
-        }
-
-        private function applyTint(age:Number):void
-        {
-            var c:uint;
-            if (age < WHITE_TINT_TIME)
-            {
-                c = mixColor(0xFFFFFF, _targetColor, age / WHITE_TINT_TIME);
-            }
-            else
-            {
-                c = _targetColor;
-            }
-            _tf.textColor = c;
-        }
-
-        private function applyFade(progress:Number):void
-        {
-            if (progress < FADE_START)
-                alpha = _baseAlpha;
-            else
-                alpha = _baseAlpha * (1.0 - (progress - FADE_START) / (1.0 - FADE_START));
-        }
-
-        private function easeOut(p:Number):Number
-        {
-            if (p < 0) p = 0;
-            if (p > 1) p = 1;
-            return 1.0 - (1.0 - p) * (1.0 - p);
         }
 
         private function normalizeDamageColor(c:uint):uint
@@ -167,24 +109,9 @@ package com.flyingdamage
             ];
         }
 
-        private function mixColor(a:uint, b:uint, t:Number):uint
-        {
-            if (t < 0) t = 0;
-            if (t > 1) t = 1;
-            var ar:int = (a >> 16) & 0xFF;
-            var ag:int = (a >> 8) & 0xFF;
-            var ab:int = a & 0xFF;
-            var br:int = (b >> 16) & 0xFF;
-            var bg:int = (b >> 8) & 0xFF;
-            var bb:int = b & 0xFF;
-            var rr:int = ar + int((br - ar) * t);
-            var rg:int = ag + int((bg - ag) * t);
-            var rb:int = ab + int((bb - ab) * t);
-            return (rr << 16) | (rg << 8) | rb;
-        }
-
         public function dispose():void
         {
+            _anim = null;
             if (_tf != null)
             {
                 if (_tf.parent != null)
