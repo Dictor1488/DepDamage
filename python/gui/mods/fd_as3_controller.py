@@ -8,7 +8,6 @@ from gui.mods import fd_as3_state as state
 from gui.mods.fd_as3_flash import FlyingDamageFlash
 
 logger = logging.getLogger(__name__)
-_CLOSE_DELAY = 2.2
 _LABELED_TYPES = ('blocked', 'blocked_crit', 'ricochet')
 
 
@@ -17,7 +16,6 @@ class Controller(object):
     def __init__(self):
         self._battleMode = False
         self._flash = None
-        self._closeCb = None
         self._logN = 0
 
     def init(self):
@@ -61,8 +59,10 @@ class Controller(object):
 
     def _onAvatarReady(self, *a, **kw):
         self._battleMode = True
+        self._logN = 0
         del state.queue[:]
         logger.info('[FD_AS3] avatar ready')
+        self._ensureFlash()
         BigWorld.callback(3.0, self._installSuppressionSafe)
 
     def _installSuppressionSafe(self):
@@ -85,14 +85,9 @@ class Controller(object):
             setView(self)
         except Exception:
             pass
+        self._ensureFlash()
 
     def _destroyFlash(self, clearQueue=False):
-        try:
-            if self._closeCb is not None:
-                BigWorld.cancelCallback(self._closeCb)
-        except Exception:
-            pass
-        self._closeCb = None
         if clearQueue:
             del state.queue[:]
         if self._flash is not None:
@@ -102,19 +97,19 @@ class Controller(object):
                 pass
             self._flash = None
 
-    def _closeLater(self):
-        self._closeCb = None
-        self._destroyFlash(False)
-
-    def _createFlash(self):
+    def _ensureFlash(self):
         if not self._battleMode:
             return
-        self._destroyFlash(False)
+        if self._flash is not None:
+            try:
+                self._flash.as_update()
+            except Exception:
+                pass
+            return
         try:
             self._flash = FlyingDamageFlash()
             self._flash.activate()
-            self._closeCb = BigWorld.callback(_CLOSE_DELAY, self._closeLater)
-            logger.info('[FD_AS3] flash recreated q=%s', len(state.queue))
+            logger.info('[FD_AS3] flash created persistent q=%s', len(state.queue))
         except Exception:
             logger.error('[FD_AS3] create failed', exc_info=True)
             self._flash = None
@@ -198,7 +193,7 @@ class Controller(object):
         if self._logN < 120:
             self._logN += 1
             logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, damageType, int(colorRGB) & 0xFFFFFF, len(state.queue))
-        self._createFlash()
+        self._ensureFlash()
 
 
 g_controller = Controller()
