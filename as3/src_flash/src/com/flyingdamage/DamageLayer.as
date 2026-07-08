@@ -17,16 +17,20 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false, hasHp:Boolean = false, hpCur:int = 0, hpBefore:int = 0, hpMax:int = 0):void
+        public function showDamage(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, alpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false, hasHp:Boolean = false, hpCur:int = 0, hpBefore:int = 0, hpMax:int = 0, sourceFlag:uint = 0, damageType:String = "shot"):void
         {
             if (damage <= 0)
                 return;
 
-            var splash:HpSplash = new HpSplash(vehicleID, damage, colorRGB, startX, startY, hasStart, hasHp, hpCur, hpBefore, hpMax);
+            var colorName:String = VehicleMarkerFlags.getDamageColorName(sourceFlag, "red");
+            var markerColor:uint = VehicleMarkerFlags.getColorRGB(colorName);
+            var finalColor:uint = colorRGB != 0 ? colorRGB : markerColor;
+
+            var splash:HpSplash = new HpSplash(vehicleID, damage, finalColor, startX, startY, hasStart, hasHp, hpCur, hpBefore, hpMax);
             addChild(splash);
             _splashes.push(splash);
 
-            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha, startX, startY, hasStart);
+            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, finalColor, fontSize, alpha, startX, startY, hasStart);
             addChild(fn);
             _items.push(fn);
         }
