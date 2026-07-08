@@ -44,6 +44,7 @@ def resetState():
     _feedMine.clear()
     _feedTypes.clear()
     _lastAttacker.clear()
+    _feedLog[0] = 0
 
 
 def installHooks():
@@ -104,6 +105,8 @@ def _recordAttacker(vehicle, args):
             pass
     if len(ints) >= 3:
         _lastAttacker[vid] = ints[2]
+        if _feedLog[0] < 500:
+            logger.info('[FD_DEBUG_ATTACKER] vid=%s attacker=%s ints=%s rawArgs=%s', vid, ints[2], ints, _compactArgs(args, 10, 160))
 
 
 def isMyDamage(vid):
@@ -134,9 +137,15 @@ def showDamageForVehicle(vid, damage, damageType='shot'):
     if damage <= 0 and damageType not in _LABELED_TYPES:
         return
     myDamage = isMyDamage(vid)
-    _feedPending[vid] = _feedPending.get(vid, 0) + max(0, damage)
+    oldDamage = _feedPending.get(vid, 0)
+    oldType = _feedTypes.get(vid, 'shot')
+    mergedType = _mergeDamageType(oldType, damageType)
+    _feedPending[vid] = oldDamage + max(0, damage)
     _feedMine[vid] = _feedMine.get(vid, False) or myDamage
-    _feedTypes[vid] = _mergeDamageType(_feedTypes.get(vid, 'shot'), damageType)
+    _feedTypes[vid] = mergedType
+    if _feedLog[0] < 500:
+        logger.info('[FD_DEBUG_FEED_IN] vid=%s addDmg=%s totalBefore=%s totalAfter=%s typeIn=%s typeOld=%s typeMerged=%s myDamage=%s attacker=%s',
+                    vid, damage, oldDamage, _feedPending[vid], damageType, oldType, mergedType, myDamage, _lastAttacker.get(vid))
     if vid not in _feedCallbacks:
         _feedCallbacks[vid] = BigWorld.callback(_FEED_MERGE, lambda: _feedFlush(vid))
 
@@ -150,26 +159,26 @@ def _feedFlush(vid):
         return
     ctrl = _ctrlRef[0]
     if ctrl is None:
-        if _feedLog[0] < 20:
+        if _feedLog[0] < 500:
             _feedLog[0] += 1
-            logger.info('[FlyingDamageGF] feedFlush: ctrl is None dmg=%d type=%s', damage, damageType)
+            logger.info('[FD_DEBUG_FEED_OUT] ctrl=None vid=%s dmg=%d type=%s', vid, damage, damageType)
         return
     vehicle = BigWorld.entity(vid)
     if vehicle is None:
-        if _feedLog[0] < 20:
+        if _feedLog[0] < 500:
             _feedLog[0] += 1
-            logger.info('[FlyingDamageGF] feedFlush: vehicle None vid=%s', vid)
+            logger.info('[FD_DEBUG_FEED_OUT] vehicle=None vid=%s dmg=%d type=%s', vid, damage, damageType)
         return
     if not _isVehicleUsable(vehicle):
-        if _feedLog[0] < 20:
+        if _feedLog[0] < 500:
             _feedLog[0] += 1
-            logger.info('[FlyingDamageGF] feedFlush: vehicle not usable vid=%s', vid)
+            logger.info('[FD_DEBUG_FEED_OUT] vehicleNotUsable vid=%s dmg=%d type=%s', vid, damage, damageType)
         return
     isEnemy = _isEnemy(vehicle, vid)
     color = _PLAYER_DAMAGE_COLOR if myDamage else g_config.colorForTeam(isEnemy)
-    if _feedLog[0] < 100:
+    if _feedLog[0] < 500:
         _feedLog[0] += 1
-        logger.info('[FlyingDamageGF] feedFlush -> AS3 showDamage vid=%s dmg=%d type=%s mine=%s color=0x%06X', vid, damage, damageType, myDamage, color)
+        logger.info('[FD_DEBUG_FEED_OUT] vid=%s dmg=%d type=%s mine=%s enemy=%s attacker=%s color=0x%06X', vid, damage, damageType, myDamage, isEnemy, _lastAttacker.get(vid), color)
     try:
         ctrl.showDamage(vid, damage, color, g_config.fontSize, g_config.opacity / 100.0, damageType)
     except TypeError:
@@ -190,6 +199,21 @@ def _mergeDamageType(oldType, newType):
         'shot': 10,
     }
     return newType if priority.get(newType, 0) >= priority.get(oldType, 0) else oldType
+
+
+def _compactArgs(args, maxCount=8, limit=120):
+    try:
+        out = []
+        for i, a in enumerate(args[:maxCount]):
+            s = repr(a)
+            if len(s) > limit:
+                s = s[:limit - 3] + '...'
+            out.append('%d:%s:%s' % (i, type(a).__name__, s))
+        if len(args) > maxCount:
+            out.append('... total=%d' % len(args))
+        return '(' + ', '.join(out) + ')'
+    except Exception:
+        return '<args>'
 
 
 def projectVehicleScreen(vid, quiet=False):
