@@ -12,20 +12,16 @@ package com.flyingdamage
         private var _critical:CriticalHitLabel;
         private var _anim:DamageAnimatedLabel;
         private var _bornAt:int;
-        private var _markerX:Number = 0;
-        private var _markerY:Number = 0;
-        private var _hasMarker:Boolean = false;
         private var _damageType:String;
 
-        public function FloatingNumber(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, baseAlpha:Number, startX:Number = 0, startY:Number = 0, hasStart:Boolean = false, sourceFlag:uint = 0, damageType:String = "shot")
+        public function FloatingNumber(vehicleID:String, damage:int, colorRGB:uint, fontSize:int, baseAlpha:Number, sourceFlag:uint = 0, damageType:String = "shot")
         {
             this.vehicleID = vehicleID;
             _bornAt = getTimer();
-            _markerX = startX;
-            _markerY = startY;
-            _hasMarker = hasStart;
             _damageType = damageType;
 
+            // Same model as VehicleMarker.as: the damage label is a child of the
+            // marker-local damage container. It does not know screen coordinates.
             if (VehicleMarkerFlags.checkLabeledDamages(_damageType))
             {
                 _labeled = new LabeledDamageLabel(_damageType, fontSize);
@@ -37,36 +33,20 @@ package com.flyingdamage
                 _label = new DamageLabel(damage, fontSize, colorRGB, sourceFlag, damageType);
                 addChild(_label);
                 _anim = new DamageAnimatedLabel(this, _label.textField, _label.color, baseAlpha, 40.0);
-
-                if (_damageType == VehicleMarkerFlags.DAMAGE_BLOCKED_CRIT)
-                    addCriticalLabel("CRIT");
             }
 
-            visible = _hasMarker;
+            visible = true;
         }
 
-        public function update(pos:Object):Boolean
+        public function update():Boolean
         {
             var age:Number = (getTimer() - _bornAt) / 1000.0;
             if (_anim == null || !_anim.isAlive(age))
                 return false;
 
-            if (!_hasMarker && pos != null && pos.ok)
-            {
-                _markerX = Number(pos.x);
-                _markerY = Number(pos.y);
-                _hasMarker = true;
-            }
-
-            if (!_hasMarker)
-            {
-                visible = false;
-                return true;
-            }
-
             visible = true;
-            x = _markerX + VehicleMarkerDamageLayout.DAMAGE_X;
-            y = _markerY + VehicleMarkerDamageLayout.getDamageLabelOffset(true, true, true, true) + _anim.getYOffset(age);
+            x = VehicleMarkerDamageLayout.DAMAGE_X;
+            y = VehicleMarkerDamageLayout.getDamageLabelOffset(true, true, true, true) + _anim.getYOffset(age);
             updateCriticalLayout();
             _anim.update(age);
 
