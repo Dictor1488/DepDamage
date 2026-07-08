@@ -2,7 +2,9 @@
     "version": 5,
     "software": {
         "animate": " ",
-        "python": "C:/Python27/python.exe"
+        "python": "C:/Python27/python.exe",
+        "mxmlc": "",
+        "flex_sdk": ""
     },
     "game": {
         "force": false,
@@ -12,7 +14,7 @@
     "info": {
         "id": "com.author.flyingdamage",
         "name": "Flying Damage",
-        "description": "AS3 source based vehicle marker damage logic. No FlyingDamageApp overlay and no binary SWF replacement committed.",
+        "description": "AS3 source based vehicle marker damage logic. No FlyingDamageApp overlay, no Gameface files, no old binary SWF replacement.",
         "version": "4.0.2"
     }
 }
