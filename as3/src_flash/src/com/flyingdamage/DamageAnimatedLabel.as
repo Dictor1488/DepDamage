@@ -11,13 +11,13 @@ package com.flyingdamage
         private var _baseAlpha:Number;
         private var _risePixels:Number;
 
+        // Ported from the working DamageAnimatedLabel.as:
+        // emerge 0.3s, white tint 0.4s, upward move 2s, fade over last 0.5s.
         public static const LIFETIME:Number = 2.0;
         public static const MOVE_TIME:Number = 2.0;
-        public static const FADE_OUT_TIME:Number = 0.5;
         public static const EMERGE_TIME:Number = 0.30;
         public static const WHITE_TINT_TIME:Number = 0.40;
-        public static const START_SCALE:Number = 0.82;
-        public static const END_SCALE:Number = 1.0;
+        public static const FADE_OUT_TIME:Number = 0.50;
 
         public function DamageAnimatedLabel(target:DisplayObject, textField:TextField, targetColor:uint, baseAlpha:Number, risePixels:Number = 40.0)
         {
@@ -26,12 +26,9 @@ package com.flyingdamage
             _targetColor = targetColor & 0xFFFFFF;
             _baseAlpha = baseAlpha;
             _risePixels = risePixels;
+
             if (_target != null)
-            {
-                _target.alpha = _baseAlpha;
-                _target.scaleX = START_SCALE;
-                _target.scaleY = START_SCALE;
-            }
+                _target.alpha = 0.0;
             if (_tf != null)
                 _tf.textColor = 0xFFFFFF;
         }
@@ -43,33 +40,29 @@ package com.flyingdamage
 
         public function getYOffset(age:Number):Number
         {
-            var moveProgress:Number = clamp01(age / MOVE_TIME);
-            return -_risePixels * moveProgress;
+            return -_risePixels * clamp01(age / MOVE_TIME);
         }
 
         public function update(age:Number):void
         {
-            applyEmerge(age);
+            applyEmergeAndFade(age);
             applyTint(age);
-            applyFade(age);
         }
 
-        private function applyEmerge(age:Number):void
+        private function applyEmergeAndFade(age:Number):void
         {
             if (_target == null)
                 return;
+
+            var a:Number = _baseAlpha;
             if (age < EMERGE_TIME)
-            {
-                var p:Number = easeOut(age / EMERGE_TIME);
-                var s:Number = START_SCALE + (END_SCALE - START_SCALE) * p;
-                _target.scaleX = s;
-                _target.scaleY = s;
-            }
-            else
-            {
-                _target.scaleX = END_SCALE;
-                _target.scaleY = END_SCALE;
-            }
+                a = _baseAlpha * clamp01(age / EMERGE_TIME);
+
+            var fadeStart:Number = LIFETIME - FADE_OUT_TIME;
+            if (age >= fadeStart)
+                a *= 1.0 - clamp01((age - fadeStart) / FADE_OUT_TIME);
+
+            _target.alpha = a;
         }
 
         private function applyTint(age:Number):void
@@ -80,23 +73,6 @@ package com.flyingdamage
                 _tf.textColor = mixColor(0xFFFFFF, _targetColor, age / WHITE_TINT_TIME);
             else
                 _tf.textColor = _targetColor;
-        }
-
-        private function applyFade(age:Number):void
-        {
-            if (_target == null)
-                return;
-            var fadeStart:Number = LIFETIME - FADE_OUT_TIME;
-            if (age < fadeStart)
-                _target.alpha = _baseAlpha;
-            else
-                _target.alpha = _baseAlpha * (1.0 - clamp01((age - fadeStart) / FADE_OUT_TIME));
-        }
-
-        private function easeOut(p:Number):Number
-        {
-            p = clamp01(p);
-            return 1.0 - (1.0 - p) * (1.0 - p);
         }
 
         private function clamp01(v:Number):Number
