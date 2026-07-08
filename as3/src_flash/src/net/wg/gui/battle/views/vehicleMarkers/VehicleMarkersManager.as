@@ -1,120 +1,245 @@
 package net.wg.gui.battle.views.vehicleMarkers
 {
-    import flash.display.Sprite;
-    import flash.utils.Dictionary;
-
-    /**
-     * Compact manager shell for the simplified marker build.
-     * It keeps only marker storage and forwards health/damage calls to VehicleMarker.
-     */
-    public class VehicleMarkersManager extends Sprite
-    {
-        private static var _instance:VehicleMarkersManager;
-
-        private var markers:Dictionary = new Dictionary();
-        private var _showExInfo:Boolean = false;
-        private var _isColorBlind:Boolean = false;
-        private var _splashDuration:int = 1000;
-        private var _extraConfig:Object = null;
-
-        public function VehicleMarkersManager()
-        {
-            super();
-            _instance = this;
-        }
-
-        public static function getInstance() : VehicleMarkersManager
-        {
-            return _instance;
-        }
-
-        public function as_setExtraConfig(value:Object) : void
-        {
-            _extraConfig = value;
-        }
-
-        public function getExtraConfig() : Object
-        {
-            return _extraConfig;
-        }
-
-        public function as_setColorBlind(value:Boolean) : void
-        {
-            _isColorBlind = value;
-        }
-
-        public function as_setColorSchemes(defaultSchemes:Object, colorBlindSchemes:Object) : void
-        {
-        }
-
-        public function as_setMarkerDuration(value:int) : void
-        {
-            _splashDuration = value;
-        }
-
-        public function as_setMarkerSettings(value:Object) : void
-        {
-        }
-
-        public function as_setShowExInfoFlag(value:Boolean) : void
-        {
-            _showExInfo = value;
-        }
-
-        public function as_updateMarkersSettings() : void
-        {
-        }
-
-        public function addMarker(id:Object, marker:VehicleMarker) : void
-        {
-            if(marker == null)
+   import flash.display.Graphics;
+   import flash.geom.*;
+   import net.wg.data.constants.*;
+   import net.wg.data.constants.generated.*;
+   import net.wg.gui.battle.views.vehicleMarkers.VO.*;
+   import net.wg.gui.battle.views.vehicleMarkers.events.*;
+   import net.wg.gui.utils.*;
+   import net.wg.infrastructure.base.meta.impl.VehicleMarkersManagerMeta;
+   import net.wg.infrastructure.events.*;
+   
+   public class VehicleMarkersManager extends VehicleMarkersManagerMeta implements IVehicleMarkersManager
+   {
+      
+      public static var sInstance:VehicleMarkersManager = null;
+      
+      public var isAtlasInited:Boolean;
+      
+      private var _showExInfo:Boolean = false;
+      
+      private var _isColorBlind:Boolean = false;
+      
+      private var _markerSettings:Object = {
+         "ally":new VehicleMarkerSettings(),
+         "enemy":new VehicleMarkerSettings(),
+         "dead":new VehicleMarkerSettings()
+      };
+      
+      private var _defaultSchemes:Object = null;
+      
+      private var _colorBlindSchemes:Object = null;
+      
+      private var _currentSchemes:Object = null;
+      
+      private var _splashDuration:int = 1000;
+      
+      private var _atlasManager:RootSWFAtlasManager;
+      
+      private var _markersCallback:Array;
+      
+      public var extraConfig:Object = null;
+      
+      public function VehicleMarkersManager()
+      {
+         super();
+         sInstance = this;
+         this._atlasManager = RootSWFAtlasManager.instance;
+         this._atlasManager.addEventListener(AtlasEvent.ATLAS_INITIALIZED,this.onAtlasInitialized);
+         this._atlasManager.initAtlas(ATLAS_CONSTANTS.VEHICLE_MARKER_ATLAS);
+         this._markersCallback = [];
+      }
+      
+      public static function getInstance() : VehicleMarkersManager
+      {
+         if(sInstance == null)
+         {
+            sInstance = new VehicleMarkersManager();
+         }
+         return sInstance;
+      }
+      
+      public function as_setExtraConfig(param1:Object) : void
+      {
+         this.extraConfig = param1;
+      }
+      
+      public function getExtraConfig() : Object
+      {
+         return this.extraConfig;
+      }
+      
+      override protected function onDispose() : void
+      {
+         this.extraConfig = null;
+         this._markerSettings = null;
+         this._defaultSchemes = null;
+         this._colorBlindSchemes = null;
+         this._currentSchemes = null;
+         this._atlasManager.removeEventListener(AtlasEvent.ATLAS_INITIALIZED,this.onAtlasInitialized);
+         this._atlasManager = null;
+         RootSWFAtlasManager.instance.dispose();
+         this._markersCallback.splice(0,this._markersCallback.length);
+         this._markersCallback = null;
+         super.onDispose();
+      }
+      
+      override protected function configUI() : void
+      {
+         super.configUI();
+      }
+      
+      override protected function onPopulate() : void
+      {
+         super.onPopulate();
+      }
+      
+      public function addReadyHandler(param1:IMarkerManagerHandler) : void
+      {
+         if(this._markersCallback.indexOf(param1) == -1)
+         {
+            this._markersCallback.push(param1);
+         }
+      }
+      
+      public function as_setColorBlind(param1:Boolean) : void
+      {
+         this._isColorBlind = param1;
+         this._currentSchemes = this._isColorBlind ? this._colorBlindSchemes : this._defaultSchemes;
+         dispatchEvent(new VehicleMarkersManagerEvent(VehicleMarkersManagerEvent.UPDATE_COLORS));
+      }
+      
+      public function as_setColorSchemes(param1:Object, param2:Object) : void
+      {
+         this._defaultSchemes = param1;
+         this._colorBlindSchemes = param2;
+      }
+      
+      public function as_setMarkerDuration(param1:int) : void
+      {
+         this._splashDuration = param1;
+      }
+      
+      public function as_setMarkerSettings(param1:Object) : void
+      {
+         this._markerSettings = param1;
+      }
+      
+      public function as_setShowExInfoFlag(param1:Boolean) : void
+      {
+         if(param1 == this._showExInfo)
+         {
+            return;
+         }
+         this._showExInfo = param1;
+         dispatchEvent(new VehicleMarkersManagerEvent(VehicleMarkersManagerEvent.SHOW_EX_INFO));
+      }
+      
+      public function as_updateMarkersSettings() : void
+      {
+         dispatchEvent(new VehicleMarkersManagerEvent(VehicleMarkersManagerEvent.UPDATE_SETTINGS));
+      }
+      
+      public function drawGraphics(param1:String, param2:Graphics, param3:Point = null) : void
+      {
+         this._atlasManager.drawGraphics(ATLAS_CONSTANTS.VEHICLE_MARKER_ATLAS,param1,param2,param3);
+      }
+      
+      public function drawWithCenterAlign(param1:String, param2:Graphics, param3:Boolean, param4:Boolean, param5:int = 0, param6:int = 0) : void
+      {
+         this._atlasManager.drawWithCenterAlign(ATLAS_CONSTANTS.VEHICLE_MARKER_ATLAS,param1,param2,param3,param4,param5,param6);
+      }
+      
+      public function getAliasColor(param1:String) : String
+      {
+         if(this._currentSchemes == null)
+         {
+            return Values.EMPTY_STR;
+         }
+         if(this._currentSchemes.hasOwnProperty(param1))
+         {
+            return this._currentSchemes[param1].alias_color;
+         }
+         return Values.EMPTY_STR;
+      }
+      
+      public function getAtlasItemBounds(param1:String) : Rectangle
+      {
+         return this._atlasManager.getAtlasItemBounds(ATLAS_CONSTANTS.VEHICLE_MARKER_ATLAS,param1);
+      }
+      
+      public function getRGB(param1:String) : uint
+      {
+         var _loc2_:Array = null;
+         if(this._currentSchemes == null)
+         {
+            return 0;
+         }
+         if(this._currentSchemes.hasOwnProperty(param1))
+         {
+            _loc2_ = this._currentSchemes[param1].rgba;
+            return (_loc2_[0] << 16) + (_loc2_[1] << 8) + (_loc2_[2] << 0);
+         }
+         return 0;
+      }
+      
+      public function getTransform(param1:String) : ColorTransform
+      {
+         var _loc2_:Array = null;
+         var _loc3_:Array = null;
+         if(this._currentSchemes == null)
+         {
+            return null;
+         }
+         if(this._currentSchemes.hasOwnProperty(param1))
+         {
+            _loc2_ = this._currentSchemes[param1].transform.mult;
+            _loc3_ = this._currentSchemes[param1].transform.offset;
+            return new ColorTransform(_loc2_[0],_loc2_[1],_loc2_[2],_loc2_[3],_loc3_[0],_loc3_[1],_loc3_[2],_loc3_[3]);
+         }
+         return null;
+      }
+      
+      public function isMarkerHover(param1:Boolean) : void
+      {
+         onMarkerBeingHovered(param1);
+      }
+      
+      public function get showExInfo() : Boolean
+      {
+         return this._showExInfo;
+      }
+      
+      public function get markerSettings() : Object
+      {
+         return this._markerSettings;
+      }
+      
+      public function get splashDuration() : int
+      {
+         return this._splashDuration;
+      }
+      
+      public function get isColorBlind() : Boolean
+      {
+         return this._isColorBlind;
+      }
+      
+      private function onAtlasInitialized(param1:AtlasEvent) : void
+      {
+         var _loc2_:IMarkerManagerHandler = null;
+         if(this._atlasManager.isAtlasInitialized(ATLAS_CONSTANTS.VEHICLE_MARKER_ATLAS))
+         {
+            this.isAtlasInited = true;
+            this._atlasManager.removeEventListener(AtlasEvent.ATLAS_INITIALIZED,this.onAtlasInitialized);
+            while(this._markersCallback.length > 0)
             {
-                marker = new VehicleMarker();
+               _loc2_ = this._markersCallback.shift();
+               _loc2_.managerReadyHandler();
             }
-            markers[id] = marker;
-            if(marker.parent == null)
-            {
-                addChild(marker);
-            }
-        }
-
-        public function removeMarker(id:Object) : void
-        {
-            var marker:VehicleMarker = markers[id] as VehicleMarker;
-            if(marker != null && marker.parent == this)
-            {
-                removeChild(marker);
-            }
-            delete markers[id];
-        }
-
-        public function getMarker(id:Object) : VehicleMarker
-        {
-            return markers[id] as VehicleMarker;
-        }
-
-        public function updateHealth(id:Object, newHealth:int, damageFrom:uint, damageType:String = "shot", maxHealth:int = -1) : void
-        {
-            var marker:VehicleMarker = getMarker(id);
-            if(marker != null)
-            {
-                marker.updateHealth(newHealth, damageFrom, damageType, maxHealth);
-            }
-        }
-
-        public function get showExInfo() : Boolean
-        {
-            return _showExInfo;
-        }
-
-        public function get isColorBlind() : Boolean
-        {
-            return _isColorBlind;
-        }
-
-        public function get splashDuration() : int
-        {
-            return _splashDuration;
-        }
-    }
+         }
+      }
+   }
 }
+

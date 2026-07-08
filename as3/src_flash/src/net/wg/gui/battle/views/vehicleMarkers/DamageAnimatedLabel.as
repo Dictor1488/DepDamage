@@ -1,85 +1,83 @@
 package net.wg.gui.battle.views.vehicleMarkers
 {
-    import flash.display.DisplayObject;
-    import flash.display.DisplayObjectContainer;
-    import flash.events.Event;
-    import flash.utils.getTimer;
-
-    /**
-     * Compact replacement for the original GreenSock timeline:
-     * emerge -> rise upward -> fade -> remove from parent.
-     */
-    public class DamageAnimatedLabel
-    {
-        private static const EMERGE_DURATION:Number = 0.30;
-        private static const RISE_DURATION:Number = 2.00;
-        private static const FADE_DURATION:Number = 0.50;
-        private static const TOTAL_DURATION:Number = 2.00;
-
-        private var target:DisplayObject;
-        private var startY:Number;
-        private var endY:Number;
-        private var startTime:int;
-
-        public function DamageAnimatedLabel(display:DisplayObject, risePixels:Number = 40)
-        {
-            target = display;
-            if(target == null)
-            {
-                return;
-            }
-            startY = target.y;
-            endY = startY - risePixels;
-            startTime = getTimer();
-            target.alpha = 0;
-            target.scaleX = target.scaleY = 0.85;
-            target.addEventListener(Event.ENTER_FRAME, tick, false, 0, true);
-        }
-
-        private function tick(e:Event) : void
-        {
-            if(target == null)
-            {
-                return;
-            }
-            var t:Number = (getTimer() - startTime) / 1000.0;
-            var p:Number = Math.max(0, Math.min(1, t / TOTAL_DURATION));
-            target.y = startY + (endY - startY) * p;
-
-            if(t < EMERGE_DURATION)
-            {
-                target.alpha = t / EMERGE_DURATION;
-                target.scaleX = target.scaleY = 0.85 + 0.15 * (t / EMERGE_DURATION);
-            }
-            else if(t > TOTAL_DURATION - FADE_DURATION)
-            {
-                target.alpha = Math.max(0, (TOTAL_DURATION - t) / FADE_DURATION);
-            }
-            else
-            {
-                target.alpha = 1;
-                target.scaleX = target.scaleY = 1;
-            }
-
-            if(t >= TOTAL_DURATION)
-            {
-                dispose();
-            }
-        }
-
-        private function dispose() : void
-        {
-            if(target == null)
-            {
-                return;
-            }
-            target.removeEventListener(Event.ENTER_FRAME, tick);
-            var parent:DisplayObjectContainer = target.parent;
-            if(parent != null)
-            {
-                parent.removeChild(target);
-            }
-            target = null;
-        }
-    }
+   import com.greensock.TimelineLite;
+   import com.greensock.TweenLite;
+   import com.greensock.easing.Linear;
+   import com.greensock.plugins.TintPlugin;
+   import com.greensock.plugins.TweenPlugin;
+   import flash.display.MovieClip;
+   
+   internal class DamageAnimatedLabel
+   {
+      
+      private static var EMERGE_DURATION:Number = 0.3;
+      
+      private static var TINT_DURATION:Number = 0.4;
+      
+      private static var FADEOUT_DURATION:Number = 0.5;
+      
+      private static var FADEOUT_TIME_OFFSET:Number = -FADEOUT_DURATION;
+      
+      TweenPlugin.activate([TintPlugin]);
+      
+      private var mc:MovieClip;
+      
+      private var timeline:TimelineLite;
+      
+      public function DamageAnimatedLabel(param1:MovieClip, param2:Number)
+      {
+         super();
+         this.mc = param1;
+         var _loc4_:Number = param1.y - param2;
+         this.timeline = new TimelineLite({"onComplete":this.removeMovieClip});
+         this.timeline.insert(this.emerge(),0);
+         this.timeline.insert(this.tint(),0);
+         this.timeline.insert(this.moveUpward(2,_loc4_),0);
+         this.timeline.append(this.fadeOut(),FADEOUT_TIME_OFFSET);
+      }
+      
+      private function emerge() : TweenLite
+      {
+         return TweenLite.from(this.mc,EMERGE_DURATION,{
+            "alpha":0,
+            "ease":Linear.easeNone,
+            "cacheAsBitmap":true
+         });
+      }
+      
+      private function tint() : TweenLite
+      {
+         return TweenLite.from(this.mc,TINT_DURATION,{
+            "tint":"0xFFFFFF",
+            "ease":Linear.easeNone,
+            "cacheAsBitmap":true
+         });
+      }
+      
+      private function moveUpward(param1:Number, param2:Number) : TweenLite
+      {
+         return TweenLite.to(this.mc,param1,{
+            "y":param2,
+            "ease":Linear.easeNone,
+            "cacheAsBitmap":true
+         });
+      }
+      
+      private function fadeOut() : TweenLite
+      {
+         return TweenLite.to(this.mc,FADEOUT_DURATION,{
+            "alpha":0,
+            "ease":Linear.easeNone,
+            "cacheAsBitmap":true
+         });
+      }
+      
+      private function removeMovieClip() : void
+      {
+         this.mc.removeChildren();
+         this.mc.parent.removeChild(this.mc);
+         this.mc = null;
+      }
+   }
 }
+

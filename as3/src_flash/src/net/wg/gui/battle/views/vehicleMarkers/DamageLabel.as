@@ -1,60 +1,155 @@
 package net.wg.gui.battle.views.vehicleMarkers
 {
-    import flash.display.Sprite;
-    import flash.filters.GlowFilter;
-    import flash.text.TextField;
-    import flash.text.TextFieldAutoSize;
-    import flash.text.TextFormat;
-
-    /** Compact color-slot source for damage text formats. */
-    public class DamageLabel extends Sprite
-    {
-        public var tfMap:Object = {};
-
-        public function DamageLabel()
-        {
-            super();
-            createSlot("white",  0xFFFFFF);
-            createSlot("yellow", 0xFFDC3C);
-            createSlot("orange", 0xFF9630);
-            createSlot("red",    0xFF4646);
-            createSlot("green",  0x78FF78);
-            createSlot("gold",   0xFFD24A);
-            createSlot("blue",   0x5ADCFF);
-            createSlot("purple", 0xC060FF);
-        }
-
-        private function createSlot(name:String, color:uint) : void
-        {
-            var tf:TextField = new TextField();
-            tf.mouseEnabled = false;
-            tf.selectable = false;
-            tf.autoSize = TextFieldAutoSize.LEFT;
-            tf.defaultTextFormat = makeFormat(color);
-            tf.filters = [new GlowFilter(0x000000, 1, 4, 4, 4, 2)];
-            tf.visible = false;
-            addChild(tf);
-            tfMap[name] = tf;
-        }
-
-        private function makeFormat(color:uint) : TextFormat
-        {
-            var f:TextFormat = new TextFormat();
-            f.font = "$FieldFont";
-            f.size = 18;
-            f.bold = true;
-            f.color = color;
-            return f;
-        }
-
-        public function showTF(name:String) : TextField
-        {
-            var tf:TextField = tfMap[name] as TextField;
-            if(tf == null)
-            {
-                tf = tfMap["white"] as TextField;
-            }
-            return tf;
-        }
-    }
+   import flash.display.Sprite;
+   import flash.text.TextField;
+   import flash.text.TextFieldAutoSize;
+   import net.wg.infrastructure.interfaces.entity.IDisposable;
+   import scaleform.gfx.TextFieldEx;
+   
+   public class DamageLabel extends Sprite implements IDisposable
+   {
+      
+      public var orange:TextField = null;
+      
+      public var green:TextField = null;
+      
+      public var red:TextField = null;
+      
+      public var gold:TextField = null;
+      
+      public var blue:TextField = null;
+      
+      public var yellow:TextField = null;
+      
+      public var purple:TextField = null;
+      
+      public var white:TextField = null;
+      
+      private var _currentTF:TextField = null;
+      
+      protected var tfMap:Object = {};
+      
+      private var _disposed:Boolean = false;
+      
+      public function DamageLabel()
+      {
+         super();
+         this._currentTF = this.green;
+         this.green.visible = false;
+         this.red.visible = false;
+         this.gold.visible = false;
+         this.blue.visible = false;
+         this.orange.visible = false;
+         this.yellow.visible = false;
+         this.purple.visible = false;
+         this.white.visible = false;
+         TextFieldEx.setNoTranslate(this.green,true);
+         TextFieldEx.setNoTranslate(this.red,true);
+         TextFieldEx.setNoTranslate(this.gold,true);
+         TextFieldEx.setNoTranslate(this.blue,true);
+         TextFieldEx.setNoTranslate(this.orange,true);
+         TextFieldEx.setNoTranslate(this.yellow,true);
+         TextFieldEx.setNoTranslate(this.purple,true);
+         TextFieldEx.setNoTranslate(this.white,true);
+         this.tfMap["green"] = this.green;
+         this.tfMap["red"] = this.red;
+         this.tfMap["gold"] = this.gold;
+         this.tfMap["blue"] = this.blue;
+         this.tfMap["orange"] = this.orange;
+         this.tfMap["yellow"] = this.yellow;
+         this.tfMap["purple"] = this.purple;
+         this.tfMap["white"] = this.white;
+         this.autoSize = TextFieldAutoSize.LEFT;
+      }
+      
+      public function dispose() : void
+      {
+         this._disposed = true;
+         this.green = null;
+         this.red = null;
+         this.gold = null;
+         this.blue = null;
+         this.orange = null;
+         this.yellow = null;
+         this.purple = null;
+         this.white = null;
+         this._currentTF = null;
+         this.tfMap["green"] = null;
+         this.tfMap["red"] = null;
+         this.tfMap["gold"] = null;
+         this.tfMap["blue"] = null;
+         this.tfMap["orange"] = null;
+         this.tfMap["yellow"] = null;
+         this.tfMap["purple"] = null;
+         this.tfMap["white"] = null;
+         this.tfMap = null;
+      }
+      
+      private function showTF(param1:String) : void
+      {
+         if(this.tfMap[param1])
+         {
+            this._currentTF.visible = false;
+            this._currentTF = this.tfMap[param1];
+            this._currentTF.visible = true;
+         }
+         else
+         {
+            App.utils.asserter.assert(false,"Can\'t find TextField " + param1 + " in DamageLabel");
+         }
+      }
+      
+      public function set color(param1:String) : void
+      {
+         this.showTF(param1);
+      }
+      
+      public function set text(param1:String) : void
+      {
+         if(this._currentTF)
+         {
+            this._currentTF.text = param1;
+         }
+      }
+      
+      public function get textWidth() : Number
+      {
+         return this._currentTF ? Number(this._currentTF.textWidth) : Number(0);
+      }
+      
+      public function isDisposed() : Boolean
+      {
+         return this._disposed;
+      }
+      
+      public function set autoSize(param1:String) : void
+      {
+         var _loc2_:TextField = null;
+         switch(param1)
+         {
+            case TextFieldAutoSize.CENTER:
+               for each(_loc2_ in this.tfMap)
+               {
+                  _loc2_.autoSize = TextFieldAutoSize.CENTER;
+                  _loc2_.x = _loc2_.width >> 1;
+               }
+               break;
+            case TextFieldAutoSize.RIGHT:
+               for each(_loc2_ in this.tfMap)
+               {
+                  _loc2_.autoSize = TextFieldAutoSize.RIGHT;
+                  _loc2_.x = _loc2_.width;
+               }
+               break;
+            case TextFieldAutoSize.LEFT:
+            default:
+               for each(_loc2_ in this.tfMap)
+               {
+                  _loc2_.autoSize = TextFieldAutoSize.LEFT;
+                  _loc2_.x = 0;
+               }
+         }
+      }
+   }
 }
+
