@@ -154,10 +154,16 @@ class Controller(object):
             from flyingdamage.hooks import projectVehicleScreen
             pos = projectVehicleScreen(int(vehicleID), quiet=True)
             if pos and pos.get('ok'):
-                return True, float(pos.get('x', 0.0)), float(pos.get('y', 0.0))
+                return (True,
+                        float(pos.get('x', 0.0)),
+                        float(pos.get('y', 0.0)),
+                        float(pos.get('screenW', 0.0)),
+                        float(pos.get('screenH', 0.0)))
+            if pos:
+                return (False, 0.0, 0.0, float(pos.get('screenW', 0.0)), float(pos.get('screenH', 0.0)))
         except Exception:
             pass
-        return False, 0.0, 0.0
+        return False, 0.0, 0.0, 0.0, 0.0
 
     def _getHpData(self, vehicleID, damage):
         try:
@@ -190,7 +196,7 @@ class Controller(object):
             return
         if damage <= 0 and damageType not in _LABELED_TYPES:
             return
-        hasStart, sx, sy = self._getStartPoint(vehicleID)
+        hasStart, sx, sy, sw, sh = self._getStartPoint(vehicleID)
         hasHp, hpCur, hpBefore, hpMax = self._getHpData(vehicleID, damage)
         sourceFlag = 2 if (int(colorRGB) & 0xFFFFFF) == 0xFFDC3C else 0
         item = {
@@ -202,6 +208,8 @@ class Controller(object):
             'hasStart': bool(hasStart),
             'x': float(sx),
             'y': float(sy),
+            'screenW': float(sw),
+            'screenH': float(sh),
             'hasHp': bool(hasHp),
             'hpCur': int(hpCur),
             'hpBefore': int(hpBefore),
@@ -212,7 +220,7 @@ class Controller(object):
         state.queue.append(item)
         if self._logN < 120:
             self._logN += 1
-            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, damageType, int(colorRGB) & 0xFFFFFF, len(state.queue))
+            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s xy=(%.1f,%.1f) screen=(%.1f,%.1f) hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), float(sx), float(sy), float(sw), float(sh), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, damageType, int(colorRGB) & 0xFFFFFF, len(state.queue))
         self._createFlashForQueue()
 
 
