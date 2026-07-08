@@ -51,14 +51,21 @@ class FlyingDamageMeta(BaseDAAPIModule):
 
     def as_populate(self):
         try:
-            if self._isDAAPIInited():
+            if self._isDAAPIInited() and self.flashObject is not None and hasattr(self.flashObject, 'as_populate'):
                 self.flashObject.as_populate()
         except Exception:
             logger.error('[FD_AS3] as_populate failed', exc_info=True)
 
+    def as_update(self):
+        try:
+            if self._isDAAPIInited() and self.flashObject is not None and hasattr(self.flashObject, 'as_update'):
+                self.flashObject.as_update()
+        except Exception:
+            logger.error('[FD_AS3] as_update failed', exc_info=True)
+
     def as_dispose(self):
         try:
-            if self._isDAAPIInited():
+            if self._isDAAPIInited() and self.flashObject is not None and hasattr(self.flashObject, 'as_dispose'):
                 self.flashObject.as_dispose()
         except Exception:
             pass
@@ -106,4 +113,4 @@ class FlyingDamageFlash(ExternalFlashComponent, FlyingDamageMeta):
         try:
             super(FlyingDamageFlash, self).close()
         except Exception:
-            logger.info('[FD_AS3] close non fatal')
+            logger.info('[FD_AS3] close non fatal', exc_info=True)
