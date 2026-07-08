@@ -22,18 +22,19 @@ package com.flyingdamage
             mouseEnabled = false;
             mouseChildren = false;
 
-            _damageContainer = new Sprite();
-            _damageContainer.mouseEnabled = false;
-            _damageContainer.mouseChildren = false;
-            addChild(_damageContainer);
-
             _hpContainer = new Sprite();
             _hpContainer.mouseEnabled = false;
             _hpContainer.mouseChildren = false;
             addChild(_hpContainer);
 
+            _damageContainer = new Sprite();
+            _damageContainer.mouseEnabled = false;
+            _damageContainer.mouseChildren = false;
+            addChild(_damageContainer);
+
             _items = new Vector.<FloatingNumber>();
             _splashes = new Vector.<HpSplash>();
+            visible = false;
         }
 
         public function setMarkerSnapshot(xPos:Number, yPos:Number, ok:Boolean):void
@@ -58,7 +59,7 @@ package com.flyingdamage
             if (!VehicleMarkerFlags.checkAllowedDamages(damageType))
                 return;
 
-            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha, 0, 0, true, sourceFlag, damageType);
+            var fn:FloatingNumber = new FloatingNumber(vehicleID, damage, colorRGB, fontSize, alpha, sourceFlag, damageType);
             _damageContainer.addChild(fn);
             _items.push(fn);
         }
@@ -67,7 +68,7 @@ package com.flyingdamage
         {
             if (damage <= 0)
                 return;
-            var sp:HpSplash = new HpSplash(vehicleID, damage, colorRGB, 0, 0, true, hasHp, hpCur, hpBefore, hpMax);
+            var sp:HpSplash = new HpSplash(vehicleID, damage, colorRGB, hasHp, hpCur, hpBefore, hpMax);
             _hpContainer.addChild(sp);
             _splashes.push(sp);
         }
@@ -90,7 +91,7 @@ package com.flyingdamage
             var itemSurvivors:Vector.<FloatingNumber> = new Vector.<FloatingNumber>();
             for each (var fn:FloatingNumber in _items)
             {
-                if (fn.update(null))
+                if (fn.update())
                     itemSurvivors.push(fn);
                 else
                 {
@@ -104,7 +105,7 @@ package com.flyingdamage
             var splashSurvivors:Vector.<HpSplash> = new Vector.<HpSplash>();
             for each (var sp:HpSplash in _splashes)
             {
-                if (sp.update(null))
+                if (sp.update())
                     splashSurvivors.push(sp);
                 else
                 {
