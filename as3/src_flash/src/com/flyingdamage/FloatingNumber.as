@@ -72,9 +72,10 @@ package com.flyingdamage
 
             var progress:Number = age / LIFETIME;
 
-            // VehicleMarker-style anchoring: marker position may move every frame,
-            // damage label keeps local x/y offsets inside that moving marker.
-            if (pos != null && pos.ok)
+            // Hit-time snapshot mode: take marker position only once, then do not
+            // follow camera/marker anymore. This prevents the number from flying
+            // across the screen when the camera moves after the hit.
+            if (!_hasMarker && pos != null && pos.ok)
             {
                 _markerX = Number(pos.x);
                 _markerY = Number(pos.y);
@@ -143,25 +144,21 @@ package com.flyingdamage
         private function normalizeDamageColor(c:uint):uint
         {
             c = c & 0xFFFFFF;
-
-            // Approximate VehicleMarker damage label palette buckets.
-            // Keeps incoming Python color intent but snaps close colors to readable marker-style colors.
             var r:int = (c >> 16) & 0xFF;
             var g:int = (c >> 8) & 0xFF;
             var b:int = c & 0xFF;
 
-            if (r > 220 && g > 190 && b < 100) return 0xFFDC3C; // gold/yellow player damage
-            if (r > 200 && g < 120 && b < 120) return 0xFF4C4C;  // red
-            if (g > 170 && r < 160) return 0x7CFF4C;             // green
-            if (b > 160 && r < 160) return 0x4CC8FF;             // blue
-            if (r > 210 && g > 100 && g < 190 && b < 90) return 0xFF9A2E; // orange
-            if (r > 170 && b > 150) return 0xD979FF;             // purple
+            if (r > 220 && g > 190 && b < 100) return 0xFFDC3C;
+            if (r > 200 && g < 120 && b < 120) return 0xFF4C4C;
+            if (g > 170 && r < 160) return 0x7CFF4C;
+            if (b > 160 && r < 160) return 0x4CC8FF;
+            if (r > 210 && g > 100 && g < 190 && b < 90) return 0xFF9A2E;
+            if (r > 170 && b > 150) return 0xD979FF;
             return c;
         }
 
         private function buildFilters(c:uint):Array
         {
-            // Similar intent to marker DamageLabel: heavy readable outline + soft color glow.
             return [
                 new GlowFilter(0x000000, 1.0, 3.0, 3.0, 5.0, 2),
                 new GlowFilter(0x000000, 0.75, 6.0, 6.0, 2.0, 2),
