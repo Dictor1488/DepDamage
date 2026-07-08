@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 _installed = [False]
 _logN = [0]
+_DEBUG_LOG_LIMIT = 500
 _SKIP = ('flyingdamage',)
 _TARGET = '_updateHealthMarker'
 
@@ -30,6 +31,7 @@ def setFeed(fn):
 
 def resetState():
     _lastHealth.clear()
+    _logN[0] = 0
 
 
 def installSuppression():
@@ -77,7 +79,7 @@ def installSuppression():
                 except Exception:
                     pass
 
-    logger.info('[FlyingDamage] _updateHealthMarker hooks: %d', hooked)
+    logger.info('[FlyingDamage] _updateHealthMarker hooks: %d debugLimit=%d', hooked, _DEBUG_LOG_LIMIT)
     if hooked > 0:
         _installed[0] = True
 
@@ -99,7 +101,9 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
             vehID = args[0]
             index = args[1]
             newHealth = args[2]
+            aInfo = args[3] if len(args) >= 4 else None
             reason = args[4] if len(args) >= 5 else None
+            extId = args[5] if len(args) >= 6 else None
             damageType = _reasonToDamageType(reason, args, kwargs)
 
             if vehID in _lastHealth:
@@ -112,10 +116,18 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
                 damage = 0
             _lastHealth[vehID] = newHealth
 
-            if _logN[0] < 80:
+            if _logN[0] < _DEBUG_LOG_LIMIT:
                 _logN[0] += 1
-                logger.info('[FlyingDamage] HM veh=%s new=%s dmg=%s reason=%s dtype=%s args=%s',
-                            vehID, newHealth, damage, repr(reason), damageType, _compactArgs(args))
+                logger.info('[FD_DEBUG_HM] n=%d veh=%s index=%s prev=%s new=%s dmg=%s dtype=%s',
+                            _logN[0], vehID, index, prev, newHealth, damage, damageType)
+                logger.info('[FD_DEBUG_HM] reason type=%s repr=%s int=%s text=%s',
+                            _safeType(reason), _safeRepr(reason, 240), _safeInt(reason), _safeText(reason, 240))
+                logger.info('[FD_DEBUG_HM] aInfo type=%s repr=%s attrs=%s',
+                            _safeType(aInfo), _safeRepr(aInfo, 320), _dumpInterestingAttrs(aInfo))
+                logger.info('[FD_DEBUG_HM] extId type=%s repr=%s int=%s text=%s',
+                            _safeType(extId), _safeRepr(extId, 240), _safeInt(extId), _safeText(extId, 240))
+                logger.info('[FD_DEBUG_HM] argsFull=%s kwargs=%s',
+                            _compactArgs(args, 12, 220), _compactKwargs(kwargs))
 
             # Feed normal damage and also 0-damage labeled events like BLOCK/RICOCHET
             # if WG sends them through the same marker method.
@@ -123,7 +135,6 @@ def _updateHealthMarkerHook(base, self, *args, **kwargs):
                 try:
                     _feedCallback[0](vehID, damage, damageType)
                 except TypeError:
-                    # Backward compatibility with older callback signature.
                     _feedCallback[0](vehID, damage)
                 except Exception:
                     logger.error('[FlyingDamage] feed failed', exc_info=True)
@@ -144,7 +155,6 @@ def _reasonToDamageType(reason, args=None, kwargs=None):
         text = ''
         if reason is not None:
             text = str(reason).lower()
-        # Named/enum string cases.
         if 'ricochet' in text:
             return 'ricochet'
         if 'block' in text and 'crit' in text:
@@ -164,12 +174,7 @@ def _reasonToDamageType(reason, args=None, kwargs=None):
         if 'explosion' in text or 'ammo' in text or 'blow' in text:
             return 'explosion'
 
-        # Numeric fallback. These ids can differ between WG versions, so this is
-        # intentionally conservative; logs keep reason/args for exact mapping fixes.
-        try:
-            rid = int(reason)
-        except Exception:
-            rid = None
+        rid = _safeInt(reason)
         if rid is not None:
             if rid in (2, 16):
                 return 'fire'
@@ -188,17 +193,84 @@ def _reasonToDamageType(reason, args=None, kwargs=None):
     return 'shot'
 
 
-def _compactArgs(args):
+def _safeType(v):
+    try:
+        return type(v).__name__
+    except Exception:
+        return '<type>'
+
+
+def _safeInt(v):
+    try:
+        return int(v)
+    except Exception:
+        return None
+
+
+def _safeText(v, limit=200):
+    try:
+        s = str(v)
+    except Exception:
+        return '<str-error>'
+    if len(s) > limit:
+        s = s[:limit - 3] + '...'
+    return s
+
+
+def _safeRepr(v, limit=200):
+    try:
+        s = repr(v)
+    except Exception:
+        return '<repr-error>'
+    if len(s) > limit:
+        s = s[:limit - 3] + '...'
+    return s
+
+
+def _compactArgs(args, maxCount=8, limit=120):
     try:
         out = []
-        for a in args[:8]:
-            s = repr(a)
-            if len(s) > 90:
-                s = s[:87] + '...'
-            out.append(s)
+        for i, a in enumerate(args[:maxCount]):
+            out.append('%d:%s:%s' % (i, _safeType(a), _safeRepr(a, limit)))
+        if len(args) > maxCount:
+            out.append('... total=%d' % len(args))
         return '(' + ', '.join(out) + ')'
     except Exception:
         return '<args>'
+
+
+def _compactKwargs(kwargs):
+    try:
+        if not kwargs:
+            return '{}'
+        out = []
+        for k, v in kwargs.items():
+            out.append('%s:%s:%s' % (k, _safeType(v), _safeRepr(v, 180)))
+        return '{' + ', '.join(out) + '}'
+    except Exception:
+        return '<kwargs>'
+
+
+def _dumpInterestingAttrs(obj):
+    if obj is None:
+        return '{}'
+    names = ('attackerID', 'attackerId', 'attacker', 'attackReason', 'reason', 'damageType', 'attackReasonID', 'hitFlags', 'flags', 'isCritical', 'isBlocked', 'isRicochet', 'isFire', 'isExplosion')
+    out = []
+    for name in names:
+        try:
+            if hasattr(obj, name):
+                out.append('%s=%s' % (name, _safeRepr(getattr(obj, name), 120)))
+        except Exception:
+            pass
+    try:
+        if isinstance(obj, dict):
+            for k in obj.keys():
+                if len(out) >= 20:
+                    break
+                out.append('%s=%s' % (_safeRepr(k, 60), _safeRepr(obj.get(k), 120)))
+    except Exception:
+        pass
+    return '{' + ', '.join(out) + '}'
 
 
 def _maxHealth(vehID, fallback):
