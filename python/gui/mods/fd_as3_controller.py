@@ -9,6 +9,7 @@ from gui.mods.fd_as3_flash import FlyingDamageFlash
 
 logger = logging.getLogger(__name__)
 _CLOSE_DELAY = 2.2
+_LABELED_TYPES = ('blocked', 'blocked_crit', 'ricochet')
 
 
 class Controller(object):
@@ -159,7 +160,7 @@ class Controller(object):
                 cur = 0
             if cur > maxHp:
                 cur = maxHp
-            before = cur + int(damage)
+            before = cur + int(max(0, damage))
             if before > maxHp:
                 before = maxHp
             if before < cur:
@@ -168,15 +169,18 @@ class Controller(object):
         except Exception:
             return False, 0, 0, 0
 
-    def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha):
-        if not self._battleMode or damage <= 0:
+    def showDamage(self, vehicleID, damage, colorRGB, fontSize, alpha, damageType='shot'):
+        damageType = damageType or 'shot'
+        if not self._battleMode:
+            return
+        if damage <= 0 and damageType not in _LABELED_TYPES:
             return
         hasStart, sx, sy = self._getStartPoint(vehicleID)
         hasHp, hpCur, hpBefore, hpMax = self._getHpData(vehicleID, damage)
         sourceFlag = 2 if (int(colorRGB) & 0xFFFFFF) == 0xFFDC3C else 0
         item = {
             'vid': str(int(vehicleID)),
-            'dmg': int(damage),
+            'dmg': int(max(0, damage)),
             'color': int(colorRGB) & 0xFFFFFF,
             'size': int(fontSize),
             'alpha': float(alpha),
@@ -188,12 +192,12 @@ class Controller(object):
             'hpBefore': int(hpBefore),
             'hpMax': int(hpMax),
             'sourceFlag': int(sourceFlag),
-            'damageType': 'shot',
+            'damageType': str(damageType),
         }
         state.queue.append(item)
-        if self._logN < 100:
+        if self._logN < 120:
             self._logN += 1
-            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, 'shot', int(colorRGB) & 0xFFFFFF, len(state.queue))
+            logger.info('[FD_AS3] queued marker vid=%s dmg=%s hasStart=%s hp=%s %s/%s->%s source=%s type=%s color=0x%06X q=%s', int(vehicleID), int(damage), bool(hasStart), bool(hasHp), hpBefore, hpMax, hpCur, sourceFlag, damageType, int(colorRGB) & 0xFFFFFF, len(state.queue))
         self._createFlash()
 
 
