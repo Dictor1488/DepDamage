@@ -2,6 +2,7 @@ package com.flyingdamage
 {
     import flash.display.Sprite;
     import flash.events.Event;
+    import flash.filters.GlowFilter;
     import flash.text.AntiAliasType;
     import flash.text.TextField;
     import flash.text.TextFormat;
@@ -35,6 +36,7 @@ package com.flyingdamage
             _tf.width = 220;
             _tf.height = 80;
             _tf.defaultTextFormat = new TextFormat('$FieldFont', 18, 0xFFFFFF, false, false, false, null, null, 'center');
+            _tf.filters = [new GlowFilter(0x000000, 1, 3, 3, 2, 1)];
             _tf.htmlText = text;
             _tf.x = -110;
             _tf.y = 0;

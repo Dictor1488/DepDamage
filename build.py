@@ -53,14 +53,24 @@ def compile_python(pyexe):
         return
     for path in pathlib.Path('python').rglob('*.py'):
         print('compile', path)
-        subprocess.call([pyexe, '-m', 'py_compile', str(path)])
+        try:
+            subprocess.call([pyexe, '-m', 'py_compile', str(path)])
+        except OSError:
+            print('python compiler not available, keeping sources only:', path)
+
+
+def _mxmlc_path(cfg):
+    mxmlc = cfg.get('software', {}).get('mxmlc') or ''
+    flex_sdk = cfg.get('software', {}).get('flex_sdk') or ''
+    if mxmlc:
+        return mxmlc
+    if flex_sdk:
+        return str(pathlib.Path(flex_sdk) / 'bin' / ('mxmlc.exe' if os.name == 'nt' else 'mxmlc'))
+    return os.environ.get('MXMLC') or shutil.which('mxmlc')
 
 
 def build_flash(cfg):
-    mxmlc = cfg.get('software', {}).get('mxmlc') or ''
-    flex_sdk = cfg.get('software', {}).get('flex_sdk') or ''
-    if not mxmlc and flex_sdk:
-        mxmlc = str(pathlib.Path(flex_sdk) / 'bin' / ('mxmlc.exe' if os.name == 'nt' else 'mxmlc'))
+    mxmlc = _mxmlc_path(cfg)
     if not mxmlc:
         print('mxmlc not configured; skipping AS3 build')
         return
@@ -103,7 +113,13 @@ def main():
     with open(str(temp / 'meta.xml'), 'wb') as fh:
         fh.write(meta)
 
-    copytree('python', str(temp / 'res/scripts/client'), ignore=shutil.ignore_patterns('*.py'))
+    # During local Python 2.7 builds, .pyc files are packaged. If no compiler is available,
+    # sources are packaged so the tree remains testable in CI.
+    if any(pathlib.Path('python').rglob('*.pyc')):
+        copytree('python', str(temp / 'res/scripts/client'), ignore=shutil.ignore_patterns('*.py'))
+    else:
+        copytree('python', str(temp / 'res/scripts/client'))
+
     copytree('resources/in', str(temp / 'res'))
     copytree('as3/bin', str(temp / 'res/gui/flash'))
 

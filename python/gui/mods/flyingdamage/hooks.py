@@ -1,23 +1,36 @@
 # -*- coding: utf-8 -*-
 """XVM-like hook layer.
 
-The important idea is copied from the XVM flow:
-VehicleMarkerPlugin._updateVehicleHealth is intercepted, attacker info is packed
-into the marker updateHealth call, and AS3 does the visual work.
+Flow:
+- replace stock VehicleMarker symbol with DepDamageVehicleMarker;
+- intercept VehicleMarkerPlugin._updateVehicleHealth;
+- pass packed damage type and attacker id to marker.updateHealth;
+- AS3 marker calculates damage delta and renders floating text.
 """
 
 import logging
 
-from constants import ATTACK_REASONS
 from BattleReplay import g_replayCtrl
+from constants import ATTACK_REASONS
+from gui.Scaleform.daapi.view.battle.shared.markers2d.manager import MarkersManager
+from gui.Scaleform.daapi.view.battle.shared.markers2d.settings import CommonMarkerType
 from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
+from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 from helpers import dependency
 from skeletons.gui.battle_session import IBattleSessionProvider
-from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 
 from xfw import overrideMethod
 
-from flyingdamage.consts import FROM_UNKNOWN, FROM_PLAYER, FROM_SQUAD, FROM_ALLY, FROM_ENEMY, PACK_SEPARATOR
+from flyingdamage.consts import (
+    FROM_UNKNOWN,
+    FROM_PLAYER,
+    FROM_SQUAD,
+    FROM_ALLY,
+    FROM_ENEMY,
+    PACK_SEPARATOR,
+    STOCK_VEHICLE_MARKER_SYMBOL,
+    DEPDAMAGE_VEHICLE_MARKER_SYMBOL,
+)
 
 LOG = logging.getLogger('DepDamage')
 _ENABLED = False
@@ -66,6 +79,12 @@ class _DamageOrigin(object):
 _ORIGIN = _DamageOrigin()
 
 
+def _MarkersManager_createMarker(base, self, symbol, matrixProvider=None, active=True, markerType=CommonMarkerType.NORMAL):
+    if _ENABLED and symbol == STOCK_VEHICLE_MARKER_SYMBOL:
+        symbol = DEPDAMAGE_VEHICLE_MARKER_SYMBOL
+    return base(self, symbol, matrixProvider, active, markerType)
+
+
 def _VehicleMarkerPlugin_updateVehicleHealth(base, self, vehicleID, handle, newHealth, aInfo, attackReasonID):
     if not _ENABLED:
         return base(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
@@ -78,8 +97,6 @@ def _VehicleMarkerPlugin_updateVehicleHealth(base, self, vehicleID, handle, newH
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
         packedDamageType = PACK_SEPARATOR.join([_safe_attack_reason(attackReasonID), str(attackerID)])
 
-        # This is the XVM-style bridge point. The custom marker SWF must override
-        # updateHealth and unpack damageType into real damage type + attackerID.
         self._invokeMarker(handle, 'updateHealth', newHealth, damageFlag, packedDamageType)
         return
     except Exception:
@@ -100,4 +117,5 @@ def fini():
     LOG.info('[DepDamage] hooks disabled')
 
 
+overrideMethod(MarkersManager, 'createMarker')(_MarkersManager_createMarker)
 overrideMethod(VehicleMarkerPlugin, '_updateVehicleHealth')(_VehicleMarkerPlugin_updateVehicleHealth)

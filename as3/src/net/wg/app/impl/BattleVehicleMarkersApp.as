@@ -2,20 +2,18 @@ package net.wg.app.impl
 {
     import net.wg.app.iml.base.RootApp;
     import net.wg.data.constants.generated.ROOT_SWF_CONSTANTS;
+    import net.wg.gui.battle.views.vehicleMarkers.DepDamageVehicleMarker;
     import net.wg.gui.battle.views.vehicleMarkers.VehicleMarkersManager;
     import net.wg.infrastructure.base.meta.impl.ClassManagerBattleMarkersMeta;
     import net.wg.infrastructure.interfaces.IRootAppMainContent;
 
-    /**
-     * Root for the vehicle markers SWF replacement.
-     *
-     * Next step: wire com.flyingdamage.FloatingDamageLayer into the concrete
-     * vehicle marker class, the same way XVM adds its DamageTextComponent to
-     * XvmVehicleMarker.
-     */
     public class BattleVehicleMarkersApp extends RootApp
     {
         public static const CLASS_MANAGER_META:Class = ClassManagerBattleMarkersMeta;
+
+        // Force compiler/linker to keep the marker class in the SWF.
+        private static const DEPDAMAGE_MARKER_CLASS:Class = DepDamageVehicleMarker;
+
         private static const LIBS_LIST:Vector.<String> = new <String>[
             'epicSharedAssets.swf',
             'battleStaticMarkers.swf',

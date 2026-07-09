@@ -1,0 +1,29 @@
+name: Build DepDamage
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3 for packer
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build package without Flash compile
+        run: python build.py --distribute
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DepDamage-build
+          path: build/*
