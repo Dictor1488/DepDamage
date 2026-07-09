@@ -1,0 +1,7 @@
+build/
+temp/
+*.pyc
+*.pyo
+__pycache__/
+as3/bin/
+.DS_Store

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "software": {
+    "python": "C:/Python27/python.exe",
+    "mxmlc": "",
+    "flex_sdk": ""
+  },
+  "game": {
+    "folder": "World_of_Tanks_EU",
+    "version": "2.3.0.1"
+  },
+  "info": {
+    "id": "com.author.depdmg",
+    "name": "DepDamage",
+    "description": "XVM-style floating damage rebuilt from zero.",
+    "version": "0.1.0"
+  }
+}
