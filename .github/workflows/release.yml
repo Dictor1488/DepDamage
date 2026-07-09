@@ -1,0 +1,227 @@
+name: Build and Release .wotmod
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      build_swf:
+        description: 'Build SWF files'
+        required: true
+        type: boolean
+        default: true
+      version:
+        description: 'Mod Version'
+        required: true
+        default: '0.1.0'
+      mod_id:
+        description: 'Mod ID'
+        required: true
+        default: 'com.author.depdmg'
+      mod_name:
+        description: 'Mod Name'
+        required: true
+        default: 'DepDamage'
+      mod_description:
+        description: 'Mod Description'
+        required: true
+        default: 'XVM-style floating damage rebuilt from zero.'
+      game_version:
+        description: 'World of Tanks version'
+        required: true
+        default: '2.3.0.1'
+
+permissions:
+  contents: write
+
+env:
+  FLEX_VERSION: "4.16.1"
+  FLASH_PLAYER_VERSION: "32.0"
+  SWF_VERSION: "39"
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Python 2.7 via Chocolatey
+      run: choco install python2 -y --no-progress
+
+    - name: Install Java (required for Flex SDK)
+      if: inputs.build_swf == true || github.event_name == 'push'
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '11'
+
+    - name: Cache Flex SDK
+      if: inputs.build_swf == true || github.event_name == 'push'
+      id: cache-flex
+      uses: actions/cache@v4
+      with:
+        path: C:\flex-sdk
+        key: flex-sdk-${{ env.FLEX_VERSION }}-v2
+
+    - name: Download and Setup Apache Flex SDK
+      if: (inputs.build_swf == true || github.event_name == 'push') && steps.cache-flex.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        Write-Host "Downloading Apache Flex SDK ${{ env.FLEX_VERSION }}..."
+        $flexUrls = @(
+            "https://archive.apache.org/dist/flex/${{ env.FLEX_VERSION }}/binaries/apache-flex-sdk-${{ env.FLEX_VERSION }}-bin.zip",
+            "https://dlcdn.apache.org/flex/${{ env.FLEX_VERSION }}/binaries/apache-flex-sdk-${{ env.FLEX_VERSION }}-bin.zip"
+        )
+        $downloaded = $false
+        foreach ($url in $flexUrls) {
+            try {
+                Write-Host "Trying: $url"
+                Invoke-WebRequest -Uri $url -OutFile "flex-sdk.zip" -UseBasicParsing -TimeoutSec 300
+                $downloaded = $true
+                break
+            } catch {
+                Write-Host "Failed: $_"
+            }
+        }
+        if (-not $downloaded) {
+            Write-Error "Could not download Flex SDK"
+            exit 1
+        }
+        New-Item -ItemType Directory -Force -Path "C:\flex-sdk" | Out-Null
+        Expand-Archive -Path "flex-sdk.zip" -DestinationPath "C:\flex-sdk-temp" -Force
+        $extractedItems = Get-ChildItem "C:\flex-sdk-temp"
+        if ($extractedItems.Count -eq 1 -and $extractedItems[0].PSIsContainer) {
+            Get-ChildItem "$($extractedItems[0].FullName)" | Move-Item -Destination "C:\flex-sdk" -Force
+        } else {
+            Get-ChildItem "C:\flex-sdk-temp" | Move-Item -Destination "C:\flex-sdk" -Force
+        }
+        Remove-Item "flex-sdk.zip" -Force -ErrorAction SilentlyContinue
+        Remove-Item "C:\flex-sdk-temp" -Recurse -Force -ErrorAction SilentlyContinue
+
+    - name: Setup playerglobal.swc
+      if: inputs.build_swf == true || github.event_name == 'push'
+      shell: pwsh
+      run: |
+        $libsPlayerGlobal = "as3\libs\playerglobal.swc"
+        if (-not (Test-Path $libsPlayerGlobal)) {
+            Write-Error "playerglobal.swc not found at: $libsPlayerGlobal"
+            exit 1
+        }
+        $vDir = "C:\flex-sdk\frameworks\libs\player\32.0"
+        New-Item -ItemType Directory -Force -Path $vDir | Out-Null
+        Copy-Item $libsPlayerGlobal "$vDir\playerglobal.swc" -Force
+        Copy-Item $libsPlayerGlobal "C:\flex-sdk\frameworks\libs\player\playerglobal.swc" -Force
+        $flexConfig = "C:\flex-sdk\frameworks\flex-config.xml"
+        if (Test-Path $flexConfig) {
+            $content = Get-Content $flexConfig -Raw
+            $content = $content -replace '\{playerglobalHome\}', 'C:/flex-sdk/frameworks/libs/player'
+            $content | Set-Content $flexConfig -Encoding UTF8
+        }
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install psutil
+
+    - name: Determine Version and Mod Info
+      id: version
+      shell: pwsh
+      run: |
+        if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+            $modId = "${{ inputs.mod_id }}"
+            $modName = "${{ inputs.mod_name }}"
+            $modDescription = "${{ inputs.mod_description }}"
+            $gameVersion = "${{ inputs.game_version }}"
+        } else {
+            $version = "${{ github.ref_name }}".TrimStart('v')
+            $modId = "com.author.depdmg"
+            $modName = "DepDamage"
+            $modDescription = "XVM-style floating damage rebuilt from zero."
+            $gameVersion = "2.3.0.1"
+        }
+        echo "PROJECT_VERSION=$version" >> $env:GITHUB_ENV
+        echo "MOD_ID=$modId" >> $env:GITHUB_ENV
+        echo "MOD_NAME=$modName" >> $env:GITHUB_ENV
+        echo "MOD_DESCRIPTION=$modDescription" >> $env:GITHUB_ENV
+        echo "GAME_VERSION=$gameVersion" >> $env:GITHUB_ENV
+
+    - name: Create build.json
+      shell: pwsh
+      run: |
+        $jsonContent = @{
+            version = 1
+            software = @{
+                python = "C:/Python27/python.exe"
+                mxmlc = "C:/flex-sdk/bin/mxmlc.bat"
+                flex_sdk = "C:/flex-sdk"
+            }
+            game = @{
+                folder = "World_of_Tanks_EU"
+                version = "${{ env.GAME_VERSION }}"
+            }
+            info = @{
+                id = "${{ env.MOD_ID }}"
+                name = "${{ env.MOD_NAME }}"
+                description = "${{ env.MOD_DESCRIPTION }}"
+                version = "${{ env.PROJECT_VERSION }}"
+            }
+        } | ConvertTo-Json -Depth 4
+        $jsonContent | Out-File -FilePath build.json -Encoding UTF8
+        Get-Content build.json
+
+    - name: Build SWF files
+      if: inputs.build_swf == true || github.event_name == 'push'
+      shell: pwsh
+      run: |
+        $env:Path = "C:\flex-sdk\bin;$env:Path"
+        python build.py --flash
+
+    - name: Verify build inputs
+      shell: pwsh
+      run: |
+        Write-Host "=== Pre-build verification ===" -ForegroundColor Cyan
+        if (Test-Path "as3/bin") {
+            Get-ChildItem -Path "as3/bin" -Filter "*.swf" | ForEach-Object { Write-Host "SWF: $($_.FullName)" }
+        }
+        if (Test-Path "python") {
+            Get-ChildItem -Path "python" -Filter "*.py" -Recurse | Select-Object -First 20 | ForEach-Object { Write-Host "PY: $($_.FullName)" }
+        }
+
+    - name: Run Build Script
+      run: python build.py --distribute
+
+    - name: List build artifacts
+      shell: pwsh
+      run: |
+        if (Test-Path "build") {
+            Get-ChildItem -Path "build" -Recurse | ForEach-Object {
+                $size = if ($_.PSIsContainer) { "[DIR]" } else { "$([math]::Round($_.Length/1KB, 2)) KB" }
+                Write-Host "  $($_.FullName) - $size"
+            }
+        }
+
+    - name: Upload workflow artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: DepDamage-build
+        path: build/*
+
+    - name: Upload to Release
+      uses: ncipollo/release-action@v1.14.0
+      with:
+        tag: "v${{ env.PROJECT_VERSION }}"
+        commit: ${{ github.sha }}
+        artifacts: "build/*.wotmod,build/*.zip"
+        allowUpdates: true
+        removeArtifacts: true
+        makeLatest: true
+        token: ${{ secrets.GITHUB_TOKEN }}
