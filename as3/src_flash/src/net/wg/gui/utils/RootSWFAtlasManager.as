@@ -32,11 +32,11 @@ package net.wg.gui.utils
         {
         }
 
-        public function drawGraphics(atlasName:String, itemName:String, graphics:Graphics, scale:Number = 1) : void
+        public function drawGraphics(atlasName:String, itemName:String, position:Object, graphics:Graphics) : void
         {
         }
 
-        public function drawWithCenterAlign(atlasName:String, itemName:String, graphics:Graphics, x:Number = 0, y:Number = 0, scaleX:Number = 1, scaleY:Number = 1) : void
+        public function drawWithCenterAlign(atlasName:String, itemName:String, position:Object, graphics:Graphics, centerAlign:Boolean = true, snapToPixels:Boolean = true) : void
         {
         }
 
