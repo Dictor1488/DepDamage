@@ -36,7 +36,7 @@ package net.wg.gui.utils
         {
         }
 
-        public function drawWithCenterAlign(atlasName:String, itemName:String, graphics:Graphics, position:Object, centerAlign:Boolean = true, snapToPixels:Boolean = true) : void
+        public function drawWithCenterAlign(atlasName:String, itemName:String, graphics:Graphics, position:Object, centerAlign:Boolean = true, snapToPixels:Boolean = true, extra:Object = null) : void
         {
         }
 
