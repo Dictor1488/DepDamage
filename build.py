@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Minimal WoT .wotmod packer for DepDamage."""
+"""WoT .wotmod packer and AS3 compiler for DepDamage."""
 
 from __future__ import print_function
 
@@ -29,7 +29,7 @@ def copytree(src, dst, ignore=None):
     if ignore:
         ignored = set(ignore(str(src_path), os.listdir(str(src_path))))
     for item in src_path.iterdir():
-        if item.name in ignored:
+        if item.name in ignored or item.name == '.gitkeep':
             continue
         target = dst_path / item.name
         if item.is_dir():
@@ -69,18 +69,49 @@ def _mxmlc_path(cfg):
     return os.environ.get('MXMLC') or shutil.which('mxmlc')
 
 
+def _as3_lib_args():
+    libs_dir = pathlib.Path('as3/libs')
+    if not libs_dir.is_dir():
+        return []
+
+    args = []
+    for swc in sorted(libs_dir.rglob('*.swc')):
+        swc_path = str(swc)
+        if swc.name == 'playerglobal.swc':
+            args.append('-library-path+=' + swc_path)
+        else:
+            args.append('-external-library-path+=' + swc_path)
+    return args
+
+
 def build_flash(cfg):
     mxmlc = _mxmlc_path(cfg)
     if not mxmlc:
         print('mxmlc not configured; skipping AS3 build')
         return
+
     root = pathlib.Path('as3/src/net/wg/app/impl/BattleVehicleMarkersApp.as')
     if not root.is_file():
         print('AS3 root not found; skipping AS3 build')
         return
+
     out = pathlib.Path('as3/bin/battleVehicleMarkersApp.swf')
     out.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [mxmlc, '-source-path+=as3/src', '-static-link-runtime-shared-libraries=true', '-output=' + str(out), str(root)]
+
+    cmd = [
+        mxmlc,
+        '-source-path+=as3/src',
+        '-output=' + str(out),
+        '-target-player=32.0',
+        '-swf-version=39',
+        '-strict=true',
+        '-optimize=true',
+        '-warnings=true',
+        '-static-link-runtime-shared-libraries=true',
+    ]
+    cmd.extend(_as3_lib_args())
+    cmd.append(str(root))
+
     print(' '.join(cmd))
     subprocess.check_call(cmd)
 
@@ -109,12 +140,14 @@ def main():
     root = ET.Element('root')
     for key in ('id', 'version', 'name', 'description'):
         ET.SubElement(root, key).text = cfg['info'][key]
+    try:
+        ET.indent(root, space='    ')
+    except AttributeError:
+        pass
     meta = ET.tostring(root, encoding='utf-8')
     with open(str(temp / 'meta.xml'), 'wb') as fh:
         fh.write(meta)
 
-    # During local Python 2.7 builds, .pyc files are packaged. If no compiler is available,
-    # sources are packaged so the tree remains testable in CI.
     if any(pathlib.Path('python').rglob('*.pyc')):
         copytree('python', str(temp / 'res/scripts/client'), ignore=shutil.ignore_patterns('*.py'))
     else:
