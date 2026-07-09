@@ -20,5 +20,9 @@ package net.wg.infrastructure.base.meta.impl
         protected function onPopulate() : void
         {
         }
+
+        protected function onMarkerBeingHovered(value:Boolean) : void
+        {
+        }
     }
 }
