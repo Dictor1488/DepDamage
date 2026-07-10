@@ -84,18 +84,13 @@ def _as3_lib_args():
     return args
 
 
-def build_flash(cfg):
-    mxmlc = _mxmlc_path(cfg)
-    if not mxmlc:
-        print('mxmlc not configured; skipping AS3 build')
-        return
-
-    root = pathlib.Path('as3/src/net/wg/app/impl/BattleVehicleMarkersApp.as')
+def _compile_swf(mxmlc, root, out):
+    root = pathlib.Path(root)
     if not root.is_file():
-        print('AS3 root not found; skipping AS3 build')
+        print('AS3 root not found; skipping', root)
         return
 
-    out = pathlib.Path('as3/bin/battleVehicleMarkersApp.swf')
+    out = pathlib.Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = [
@@ -114,6 +109,28 @@ def build_flash(cfg):
 
     print(' '.join(cmd))
     subprocess.check_call(cmd)
+
+
+def build_flash(cfg):
+    mxmlc = _mxmlc_path(cfg)
+    if not mxmlc:
+        print('mxmlc not configured; skipping AS3 build')
+        return
+
+    # XVM-style flow:
+    # 1. battleVehicleMarkersApp.swf stays responsible for the WG root app;
+    # 2. it loads a separate UI SWF into ApplicationDomain.currentDomain;
+    # 3. the external UI SWF exports DepDamageVehicleMarker for Python marker replacement.
+    _compile_swf(
+        mxmlc,
+        'as3/src/com/flyingdamage/DepDamageVehicleMarkersMod.as',
+        'as3/bin/depdamage_vehiclemarkers_ui.swf'
+    )
+    _compile_swf(
+        mxmlc,
+        'as3/src/net/wg/app/impl/BattleVehicleMarkersApp.as',
+        'as3/bin/battleVehicleMarkersApp.swf'
+    )
 
 
 def main():
