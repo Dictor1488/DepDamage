@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Standalone XVM-like hook layer.
 
-No XFW dependency.
+No XFW dependency and no dependency on flyingdamage.consts at runtime.
 
 Flow:
 - replace stock VehicleMarker symbol with DepDamageVehicleMarker;
@@ -21,16 +21,14 @@ from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 from helpers import dependency
 from skeletons.gui.battle_session import IBattleSessionProvider
 
-from flyingdamage.consts import (
-    FROM_UNKNOWN,
-    FROM_PLAYER,
-    FROM_SQUAD,
-    FROM_ALLY,
-    FROM_ENEMY,
-    PACK_SEPARATOR,
-    STOCK_VEHICLE_MARKER_SYMBOL,
-    DEPDAMAGE_VEHICLE_MARKER_SYMBOL,
-)
+FROM_UNKNOWN = 0
+FROM_PLAYER = 1
+FROM_SQUAD = 2
+FROM_ALLY = 3
+FROM_ENEMY = 4
+PACK_SEPARATOR = ','
+STOCK_VEHICLE_MARKER_SYMBOL = 'VehicleMarker'
+DEPDAMAGE_VEHICLE_MARKER_SYMBOL = 'DepDamageVehicleMarker'
 
 LOG = logging.getLogger('DepDamage')
 _ENABLED = False
