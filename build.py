@@ -14,6 +14,11 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 
+BROKEN_ROOT_SWF = pathlib.Path('as3/bin/battleVehicleMarkersApp.swf')
+UI_SWF = pathlib.Path('as3/bin/depdamage_vehiclemarkers_ui.swf')
+ORIGINAL_ROOT_SWF = pathlib.Path('resources/original/gui/flash/battleVehicleMarkersApp.swf')
+
+
 def read_config():
     with open('build.json', 'r') as fh:
         return json.load(fh)
@@ -88,7 +93,7 @@ def _compile_swf(mxmlc, root, out):
     root = pathlib.Path(root)
     if not root.is_file():
         print('AS3 root not found; skipping', root)
-        return
+        return False
 
     out = pathlib.Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -109,6 +114,38 @@ def _compile_swf(mxmlc, root, out):
 
     print(' '.join(cmd))
     subprocess.check_call(cmd)
+    return True
+
+
+def _patch_original_root_swf(cfg):
+    """Patch original WG root SWF if the caller supplied it.
+
+    XVM does not rebuild battleVehicleMarkersApp.swf from AS3. It patches the
+    original WG SWF so that it loads an external marker UI SWF into the current
+    ApplicationDomain. We follow that same split:
+    - depdamage_vehiclemarkers_ui.swf is compiled from our AS3 sources;
+    - battleVehicleMarkersApp.swf is produced only by patching the original SWF.
+    """
+    if not ORIGINAL_ROOT_SWF.is_file():
+        print('Original WG root SWF not found:', ORIGINAL_ROOT_SWF)
+        print('Skipping patched battleVehicleMarkersApp.swf. This avoids packaging the broken self-built root SWF.')
+        if BROKEN_ROOT_SWF.exists():
+            BROKEN_ROOT_SWF.unlink()
+        return False
+
+    rabcdasm_dir = cfg.get('software', {}).get('rabcdasm_dir') or os.environ.get('RABCDASM_DIR', '')
+    cmd = [
+        sys.executable,
+        'tools/patch_battle_vehicle_markers.py',
+        '--original', str(ORIGINAL_ROOT_SWF),
+        '--output', str(BROKEN_ROOT_SWF),
+        '--ui-path', UI_SWF.name,
+    ]
+    if rabcdasm_dir:
+        cmd.extend(['--rabcdasm-dir', rabcdasm_dir])
+    print(' '.join(cmd))
+    subprocess.check_call(cmd)
+    return True
 
 
 def build_flash(cfg):
@@ -117,20 +154,21 @@ def build_flash(cfg):
         print('mxmlc not configured; skipping AS3 build')
         return
 
-    # XVM-style flow:
-    # 1. battleVehicleMarkersApp.swf stays responsible for the WG root app;
-    # 2. it loads a separate UI SWF into ApplicationDomain.currentDomain;
-    # 3. the external UI SWF exports DepDamageVehicleMarker for Python marker replacement.
+    # Always clean old root SWF first. The old self-built root caused:
+    # VerifyError #1001: The method RootApp is not implemented.
+    if BROKEN_ROOT_SWF.exists():
+        BROKEN_ROOT_SWF.unlink()
+
+    # Build only the external marker UI SWF. This is the SWF that should be
+    # loaded by the patched original battleVehicleMarkersApp.swf.
     _compile_swf(
         mxmlc,
         'as3/src/com/flyingdamage/DepDamageVehicleMarkersMod.as',
-        'as3/bin/depdamage_vehiclemarkers_ui.swf'
+        str(UI_SWF)
     )
-    _compile_swf(
-        mxmlc,
-        'as3/src/net/wg/app/impl/BattleVehicleMarkersApp.as',
-        'as3/bin/battleVehicleMarkersApp.swf'
-    )
+
+    # Produce battleVehicleMarkersApp.swf only from the original WG SWF + patch.
+    _patch_original_root_swf(cfg)
 
 
 def main():
