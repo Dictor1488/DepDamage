@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""XVM-like hook layer.
+"""Standalone XVM-like hook layer.
+
+No XFW dependency.
 
 Flow:
 - replace stock VehicleMarker symbol with DepDamageVehicleMarker;
@@ -19,8 +21,6 @@ from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 from helpers import dependency
 from skeletons.gui.battle_session import IBattleSessionProvider
 
-from xfw import overrideMethod
-
 from flyingdamage.consts import (
     FROM_UNKNOWN,
     FROM_PLAYER,
@@ -34,6 +34,9 @@ from flyingdamage.consts import (
 
 LOG = logging.getLogger('DepDamage')
 _ENABLED = False
+_PATCHED = False
+_ORIGINAL_CREATE_MARKER = None
+_ORIGINAL_UPDATE_HEALTH = None
 
 
 def _safe_attack_reason(attackReasonID):
@@ -79,19 +82,19 @@ class _DamageOrigin(object):
 _ORIGIN = _DamageOrigin()
 
 
-def _MarkersManager_createMarker(base, self, symbol, matrixProvider=None, active=True, markerType=CommonMarkerType.NORMAL):
+def _create_marker_hook(self, symbol, matrixProvider=None, active=True, markerType=CommonMarkerType.NORMAL):
     if _ENABLED and symbol == STOCK_VEHICLE_MARKER_SYMBOL:
         symbol = DEPDAMAGE_VEHICLE_MARKER_SYMBOL
-    return base(self, symbol, matrixProvider, active, markerType)
+    return _ORIGINAL_CREATE_MARKER(self, symbol, matrixProvider, active, markerType)
 
 
-def _VehicleMarkerPlugin_updateVehicleHealth(base, self, vehicleID, handle, newHealth, aInfo, attackReasonID):
+def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attackReasonID):
     if not _ENABLED:
-        return base(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+        return _ORIGINAL_UPDATE_HEALTH(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
 
     try:
         if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
-            return base(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+            return _ORIGINAL_UPDATE_HEALTH(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
 
         attackerID = aInfo.vehicleID if aInfo else 0
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
@@ -101,11 +104,24 @@ def _VehicleMarkerPlugin_updateVehicleHealth(base, self, vehicleID, handle, newH
         return
     except Exception:
         LOG.exception('[DepDamage] updateVehicleHealth hook failed')
-        return base(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+        return _ORIGINAL_UPDATE_HEALTH(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+
+
+def _patch():
+    global _PATCHED, _ORIGINAL_CREATE_MARKER, _ORIGINAL_UPDATE_HEALTH
+    if _PATCHED:
+        return
+    _ORIGINAL_CREATE_MARKER = MarkersManager.createMarker
+    _ORIGINAL_UPDATE_HEALTH = VehicleMarkerPlugin._updateVehicleHealth
+    MarkersManager.createMarker = _create_marker_hook
+    VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
+    _PATCHED = True
+    LOG.info('[DepDamage] standalone hooks patched')
 
 
 def init():
     global _ENABLED
+    _patch()
     _ENABLED = True
     _ORIGIN.update_player_vehicle_id()
     LOG.info('[DepDamage] hooks enabled')
@@ -115,7 +131,3 @@ def fini():
     global _ENABLED
     _ENABLED = False
     LOG.info('[DepDamage] hooks disabled')
-
-
-overrideMethod(MarkersManager, 'createMarker')(_MarkersManager_createMarker)
-overrideMethod(VehicleMarkerPlugin, '_updateVehicleHealth')(_VehicleMarkerPlugin_updateVehicleHealth)
