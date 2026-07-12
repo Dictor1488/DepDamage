@@ -1,40 +1,36 @@
 # -*- coding: utf-8 -*-
-"""Standalone XVM-like hook layer.
+"""Standalone floating-damage hooks.
 
-No XFW dependency and no dependency on flyingdamage.consts at runtime.
-
-Flow:
-- replace stock VehicleMarker symbol with DepDamageVehicleMarker;
-- intercept VehicleMarkerPlugin._updateVehicleHealth;
-- pass packed damage type and attacker id to marker.updateHealth;
-- AS3 marker calculates damage delta and renders floating text.
+The stock marker application is left untouched.  We only observe vehicle health
+updates, project the stock marker position once, and create an independent
+screen-space label in DepDamageFlash.swf.
 """
 
 import logging
 
 from BattleReplay import g_replayCtrl
 from constants import ATTACK_REASONS
-from gui.Scaleform.daapi.view.battle.shared.markers2d.manager import MarkersManager
-from gui.Scaleform.daapi.view.battle.shared.markers2d.settings import CommonMarkerType
 from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
 from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 from helpers import dependency
 from skeletons.gui.battle_session import IBattleSessionProvider
+
+from flyingdamage.overlay import DepDamageFlash
 
 FROM_UNKNOWN = 0
 FROM_PLAYER = 1
 FROM_SQUAD = 2
 FROM_ALLY = 3
 FROM_ENEMY = 4
-PACK_SEPARATOR = ','
-STOCK_VEHICLE_MARKER_SYMBOL = 'VehicleMarker'
-DEPDAMAGE_VEHICLE_MARKER_SYMBOL = 'DepDamageVehicleMarker'
 
 LOG = logging.getLogger('DepDamage')
 _ENABLED = False
 _PATCHED = False
-_ORIGINAL_CREATE_MARKER = None
+_ORIGINAL_START = None
+_ORIGINAL_STOP = None
 _ORIGINAL_UPDATE_HEALTH = None
+_OVERLAY = None
+_LAST_HEALTH = {}
 
 
 def _safe_attack_reason(attackReasonID):
@@ -80,41 +76,77 @@ class _DamageOrigin(object):
 _ORIGIN = _DamageOrigin()
 
 
-def _create_marker_hook(self, symbol, matrixProvider=None, active=True, markerType=CommonMarkerType.NORMAL):
-    if _ENABLED and symbol == STOCK_VEHICLE_MARKER_SYMBOL:
-        symbol = DEPDAMAGE_VEHICLE_MARKER_SYMBOL
-    return _ORIGINAL_CREATE_MARKER(self, symbol, matrixProvider, active, markerType)
-
-
-def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attackReasonID):
+def _start_hook(self, *args, **kwargs):
+    result = _ORIGINAL_START(self, *args, **kwargs)
     if not _ENABLED:
-        return _ORIGINAL_UPDATE_HEALTH(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+        return result
+
+    try:
+        global _OVERLAY
+        if _OVERLAY is None:
+            _OVERLAY = DepDamageFlash(self._clazz)
+            LOG.info('[DepDamage] screen overlay created')
+    except Exception:
+        LOG.exception('[DepDamage] failed to create screen overlay')
+    return result
+
+
+def _stop_hook(self, *args, **kwargs):
+    try:
+        global _OVERLAY
+        if _OVERLAY is not None:
+            _OVERLAY.close()
+            _OVERLAY = None
+        _LAST_HEALTH.clear()
+    except Exception:
+        LOG.exception('[DepDamage] failed to close screen overlay')
+    return _ORIGINAL_STOP(self, *args, **kwargs)
+
+
+def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs):
+    oldHealth = _LAST_HEALTH.get(vehicleID)
+    _LAST_HEALTH[vehicleID] = newHealth
+
+    result = _ORIGINAL_UPDATE_HEALTH(
+        self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs
+    )
+
+    if not _ENABLED or oldHealth is None:
+        return result
 
     try:
         if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
-            return _ORIGINAL_UPDATE_HEALTH(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+            return result
+
+        damage = int(oldHealth - max(newHealth, 0))
+        if damage <= 0 or _OVERLAY is None:
+            return result
 
         attackerID = aInfo.vehicleID if aInfo else 0
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
-        packedDamageType = PACK_SEPARATOR.join([_safe_attack_reason(attackReasonID), str(attackerID)])
-
-        self._invokeMarker(handle, 'updateHealth', newHealth, damageFlag, packedDamageType)
-        return
+        damageType = _safe_attack_reason(attackReasonID)
+        _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
     except Exception:
-        LOG.exception('[DepDamage] updateVehicleHealth hook failed')
-        return _ORIGINAL_UPDATE_HEALTH(self, vehicleID, handle, newHealth, aInfo, attackReasonID)
+        LOG.exception('[DepDamage] updateVehicleHealth overlay hook failed')
+
+    return result
 
 
 def _patch():
-    global _PATCHED, _ORIGINAL_CREATE_MARKER, _ORIGINAL_UPDATE_HEALTH
+    global _PATCHED, _ORIGINAL_START, _ORIGINAL_STOP, _ORIGINAL_UPDATE_HEALTH
     if _PATCHED:
         return
-    _ORIGINAL_CREATE_MARKER = MarkersManager.createMarker
+
+    _ORIGINAL_START = VehicleMarkerPlugin.start
+    _ORIGINAL_STOP = VehicleMarkerPlugin.stop
     _ORIGINAL_UPDATE_HEALTH = VehicleMarkerPlugin._updateVehicleHealth
-    MarkersManager.createMarker = _create_marker_hook
+
+    VehicleMarkerPlugin.start = _start_hook
+    VehicleMarkerPlugin.stop = _stop_hook
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
+
     _PATCHED = True
-    LOG.info('[DepDamage] standalone hooks patched')
+    LOG.info('[DepDamage] standalone overlay hooks patched')
 
 
 def init():
@@ -126,6 +158,13 @@ def init():
 
 
 def fini():
-    global _ENABLED
+    global _ENABLED, _OVERLAY
     _ENABLED = False
+    try:
+        if _OVERLAY is not None:
+            _OVERLAY.close()
+            _OVERLAY = None
+    except Exception:
+        LOG.exception('[DepDamage] overlay close failed during fini')
+    _LAST_HEALTH.clear()
     LOG.info('[DepDamage] hooks disabled')
