@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Standalone screen-space floating damage application.
-
-The start point is calculated once from the stock vehicle-marker matrix provider.
-After that the AS3 label animates independently in screen coordinates, so camera
-movement cannot drag an already-created number around.
-"""
+"""Standalone screen-space floating damage application."""
 
 import logging
 
@@ -23,9 +18,11 @@ LOG = logging.getLogger('DepDamage')
 
 class DepDamageFlashMeta(BaseDAAPIModule):
 
-    def as_showDamage(self, x, y, damage, attackerID, damageType, damageFlag):
+    def as_showDamage(self, screenWidth, screenHeight, x, y, damage, attackerID, damageType, damageFlag):
         if self._isDAAPIInited():
-            return self.flashObject.as_showDamage(x, y, damage, attackerID, damageType, damageFlag)
+            return self.flashObject.as_showDamage(
+                screenWidth, screenHeight, x, y, damage, attackerID, damageType, damageFlag
+            )
 
 
 class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
@@ -37,8 +34,6 @@ class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
         self._vehicleMarkerClass = vehicleMarkerClass
         self._viewProjection = Math.Matrix()
         self._tempMatrix = Math.Matrix()
-        self._screenWidth = 0
-        self._screenHeight = 0
 
         self.createExternalComponent()
         self.movie.backgroundAlpha = 0.0
@@ -58,18 +53,17 @@ class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
             provider = self._vehicleMarkerClass.fetchMatrixProvider(vehicle)
             self._tempMatrix.set(provider)
             point = self._tempMatrix.translation
-
             projected, visible = self._projectPoint(point)
             if not visible:
                 return False
 
-            screen = GUI.screenResolution()
-            self._screenWidth = screen[0]
-            self._screenHeight = screen[1]
-            x = (0.5 + 0.5 * projected.x) * self._screenWidth
-            y = (0.5 - 0.5 * projected.y) * self._screenHeight
-
-            self.as_showDamage(x, y, damage, attackerID, damageType, damageFlag)
+            screenWidth, screenHeight = GUI.screenResolution()
+            x = (0.5 + 0.5 * projected.x) * screenWidth
+            y = (0.5 - 0.5 * projected.y) * screenHeight
+            self.as_showDamage(
+                screenWidth, screenHeight, x, y,
+                damage, attackerID, damageType, damageFlag
+            )
             return True
         except Exception:
             LOG.exception('[DepDamage] failed to project/show damage')
