@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Standalone floating-damage hooks.
 
-The stock marker application is left untouched.  We only observe vehicle health
-updates, project the stock marker position once, and create an independent
+The stock marker application is left untouched. We observe its normal health
+lifecycle, project the stock marker position once, and create an independent
 screen-space label in DepDamageFlash.swf.
 """
 
@@ -28,6 +28,7 @@ _ENABLED = False
 _PATCHED = False
 _ORIGINAL_START = None
 _ORIGINAL_STOP = None
+_ORIGINAL_SET_HEALTH = None
 _ORIGINAL_UPDATE_HEALTH = None
 _OVERLAY = None
 _LAST_HEALTH = {}
@@ -103,13 +104,20 @@ def _stop_hook(self, *args, **kwargs):
     return _ORIGINAL_STOP(self, *args, **kwargs)
 
 
+def _set_health_marker_hook(self, vehicleID, handle, newHealth, *args, **kwargs):
+    """Capture the stock initial/current HP before the first damage event."""
+    _LAST_HEALTH[vehicleID] = max(int(newHealth), 0)
+    return _ORIGINAL_SET_HEALTH(self, vehicleID, handle, newHealth, *args, **kwargs)
+
+
 def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs):
+    normalizedHealth = max(int(newHealth), 0)
     oldHealth = _LAST_HEALTH.get(vehicleID)
-    _LAST_HEALTH[vehicleID] = newHealth
 
     result = _ORIGINAL_UPDATE_HEALTH(
         self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs
     )
+    _LAST_HEALTH[vehicleID] = normalizedHealth
 
     if not _ENABLED or oldHealth is None:
         return result
@@ -118,7 +126,7 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
             return result
 
-        damage = int(oldHealth - max(newHealth, 0))
+        damage = oldHealth - normalizedHealth
         if damage <= 0 or _OVERLAY is None:
             return result
 
@@ -133,16 +141,19 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
 
 
 def _patch():
-    global _PATCHED, _ORIGINAL_START, _ORIGINAL_STOP, _ORIGINAL_UPDATE_HEALTH
+    global _PATCHED, _ORIGINAL_START, _ORIGINAL_STOP
+    global _ORIGINAL_SET_HEALTH, _ORIGINAL_UPDATE_HEALTH
     if _PATCHED:
         return
 
     _ORIGINAL_START = VehicleMarkerPlugin.start
     _ORIGINAL_STOP = VehicleMarkerPlugin.stop
+    _ORIGINAL_SET_HEALTH = VehicleMarkerPlugin._setHealthMarker
     _ORIGINAL_UPDATE_HEALTH = VehicleMarkerPlugin._updateVehicleHealth
 
     VehicleMarkerPlugin.start = _start_hook
     VehicleMarkerPlugin.stop = _stop_hook
+    VehicleMarkerPlugin._setHealthMarker = _set_health_marker_hook
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
