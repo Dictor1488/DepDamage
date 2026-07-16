@@ -10,7 +10,7 @@ import SCALEFORM
 
 from BattleReplay import g_replayCtrl
 from constants import ATTACK_REASONS
-from gui import DEPTH_OF_VehicleMarker
+from gui import DEPTH_OF_Battle
 from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
 from gui.Scaleform.daapi.view.external_components import ExternalFlashComponent, ExternalFlashSettings
 from gui.Scaleform.flash_wrapper import InputKeyMode
@@ -59,7 +59,9 @@ class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
         self.movie.backgroundAlpha = 0.0
         self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
         self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-        self.component.position.z = DEPTH_OF_VehicleMarker - 0.01
+        # Keep the movie in the fixed 2D battle HUD plane. DEPTH_OF_VehicleMarker
+        # belongs to the projected marker plane and inherits battle-camera motion.
+        self.component.position.z = DEPTH_OF_Battle - 0.001
         self.component.focus = False
         self.component.moveFocus = False
         self.active(True)
@@ -168,7 +170,7 @@ def _start_hook(self, *args, **kwargs):
         global _OVERLAY
         if _OVERLAY is None:
             _OVERLAY = DepDamageFlash(self._clazz)
-            LOG.info('[DepDamage] screen overlay created')
+            LOG.info('[DepDamage] fixed HUD overlay created')
     except Exception:
         LOG.exception('[DepDamage] failed to create screen overlay')
     return result
