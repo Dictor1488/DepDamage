@@ -43,6 +43,7 @@ class _NativeDamageNumber(object):
         self._startX = float(x)
         self._startY = float(y)
         self._startTime = BigWorld.time()
+        self._damageFlag = damageFlag
         self._callbackID = None
         self._disposed = False
         self._onDispose = onDispose
@@ -53,32 +54,31 @@ class _NativeDamageNumber(object):
         self._text.position = (self._startX, self._startY, 0.02)
         self._text.font = 'default_medium.font'
         self._text.materialFX = GUI.Simple.eMaterialFX.ADD
-        self._text.colour = self._getColour(damageFlag, 0.0)
+        self._text.colour = self._getColour(0.0)
         self._text.visible = True
         GUI.addRoot(self._text)
 
         self._schedule()
 
-    @staticmethod
-    def _baseRGB(damageFlag):
-        if damageFlag == FROM_PLAYER:
+    def _baseRGB(self):
+        if self._damageFlag == FROM_PLAYER:
             return (255.0, 220.0, 80.0)
-        if damageFlag == FROM_SQUAD:
+        if self._damageFlag == FROM_SQUAD:
             return (120.0, 220.0, 255.0)
-        if damageFlag == FROM_ALLY:
+        if self._damageFlag == FROM_ALLY:
             return (120.0, 255.0, 120.0)
-        if damageFlag == FROM_ENEMY:
+        if self._damageFlag == FROM_ENEMY:
             return (255.0, 120.0, 120.0)
         return (255.0, 255.0, 255.0)
 
-    def _getColour(self, damageFlag, progress):
+    def _getColour(self, progress):
         if progress < 0.12:
             alpha = progress / 0.12
         elif progress > 0.72:
             alpha = max(0.0, 1.0 - (progress - 0.72) / 0.28)
         else:
             alpha = 1.0
-        r, g, b = self._baseRGB(damageFlag)
+        r, g, b = self._baseRGB()
         return (r, g, b, 255.0 * alpha)
 
     def _schedule(self):
@@ -101,7 +101,7 @@ class _NativeDamageNumber(object):
             self._startY + self.RISE * progress,
             0.02
         )
-        self._text.colour = self._getColour(self._damageFlag, progress)
+        self._text.colour = self._getColour(progress)
         self._schedule()
 
     def dispose(self):
@@ -127,14 +127,6 @@ class _NativeDamageNumber(object):
         self._onDispose = None
         if callback is not None:
             callback(self)
-
-    @property
-    def _damageFlag(self):
-        return self.__damageFlag
-
-    @_damageFlag.setter
-    def _damageFlag(self, value):
-        self.__damageFlag = value
 
 
 class NativeDamageOverlay(object):
@@ -175,7 +167,6 @@ class NativeDamageOverlay(object):
                 damageFlag,
                 self._removeNumber
             )
-            number._damageFlag = damageFlag
             self._numbers.add(number)
             return True
         except Exception:
