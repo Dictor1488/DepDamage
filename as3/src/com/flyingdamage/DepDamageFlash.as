@@ -18,23 +18,33 @@ package com.flyingdamage
             addChild(_layer);
         }
 
-        public function as_showDamage(
-            screenWidth:Number,
-            screenHeight:Number,
-            xPos:Number,
-            yPos:Number,
-            damage:int,
-            attackerID:Number,
-            damageType:String,
-            damageFlag:int
-        ):void
+        public function as_configureScreen(screenWidth:Number, screenHeight:Number):void
         {
-            // GUI.Flash centers an 800x600 movie. Shift the AS3 root so its
-            // local coordinates exactly match screen pixels from the top-left.
             this.x = SWF_HALF_WIDTH - (screenWidth / 2.0);
             this.y = SWF_HALF_HEIGHT - (screenHeight / 2.0);
+        }
 
-            _layer.showDamage(damage, attackerID, damageType, damageFlag, xPos, yPos);
+        public function as_createDamage(id:int, damage:int, damageFlag:int):void
+        {
+            _layer.createDamage(id, damage, damageFlag);
+        }
+
+        public function as_updateDamage(id:int, xPos:Number, yPos:Number, alphaValue:Number, isVisible:Boolean):void
+        {
+            _layer.updateDamage(id, xPos, yPos, alphaValue, isVisible);
+        }
+
+        public function as_removeDamage(id:int):void
+        {
+            _layer.removeDamage(id);
+        }
+
+        public function as_populate():void
+        {
+        }
+
+        public function as_dispose():void
+        {
         }
     }
 }
