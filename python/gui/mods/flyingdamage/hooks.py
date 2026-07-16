@@ -7,6 +7,7 @@ import BigWorld
 import GUI
 import Math
 import SCALEFORM
+import constants
 
 from BattleReplay import g_replayCtrl
 from constants import ATTACK_REASONS
@@ -62,9 +63,6 @@ class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
         self.component.focus = False
         self.component.moveFocus = False
 
-        # A standalone GUI.Flash root is affected by the battle GUI projection.
-        # Put the movie inside a full-screen WindowGUIComponent root instead.
-        # Window children use the window's fixed screen coordinate system.
         self._screenWindow = GUI.Window()
         self._screenWindow.position = (0.0, 0.0, 0.15)
         self._screenWindow.size = (2.0, 2.0)
@@ -219,21 +217,35 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
     normalizedHealth = max(int(newHealth), 0)
     oldHealth = _LAST_HEALTH.get(vehicleID)
 
-    result = _ORIGINAL_UPDATE_HEALTH(
-        self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs
-    )
+    # Do not call the stock _updateVehicleHealth here. It forwards damage type,
+    # attack reason and ramming data to updateHealth, which creates the game's
+    # original camera-bound floating number. Update only the HP bar, then draw
+    # the detached number in our fixed screen overlay.
+    markerHealth = newHealth
+    isAmmoBayDestroyed = constants.SPECIAL_VEHICLE_HEALTH.IS_AMMO_BAY_DESTROYED(markerHealth)
+    if markerHealth < 0 and not isAmmoBayDestroyed:
+        markerHealth = 0
+    if (self.sessionProvider.shared.vehicleState.isInPostmortem and
+            markerHealth < 0 and isAmmoBayDestroyed and not aInfo):
+        markerHealth = 0
+
+    if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
+        self._setHealthMarker(vehicleID, handle, markerHealth)
+    else:
+        self._updateHealthMarker(vehicleID, handle, markerHealth)
+
     _LAST_HEALTH[vehicleID] = normalizedHealth
 
     if not _ENABLED or oldHealth is None:
-        return result
+        return None
 
     try:
         if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
-            return result
+            return None
 
         damage = oldHealth - normalizedHealth
         if damage <= 0 or _OVERLAY is None:
-            return result
+            return None
 
         attackerID = aInfo.vehicleID if aInfo else 0
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
@@ -242,7 +254,7 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
     except Exception:
         LOG.exception('[DepDamage] updateVehicleHealth overlay hook failed')
 
-    return result
+    return None
 
 
 def _patch():
@@ -262,7 +274,7 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] standalone overlay hooks patched')
+    LOG.info('[DepDamage] stock damage animation suppressed; detached overlay patched')
 
 
 def init():
