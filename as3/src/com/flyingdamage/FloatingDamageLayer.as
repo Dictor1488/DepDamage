@@ -13,15 +13,27 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function createDamage(id:int, damage:int, damageFlag:int):void
+        public function createDamage(id:int, damage:int, damageFlag:int,
+                                     playerColor:String, allyColor:String,
+                                     enemyColor:String, fontSize:int):void
         {
             removeDamage(id);
             if (damage <= 0)
                 return;
 
+            var color:String = 'FFFFFF';
+            if (damageFlag == 1)
+                color = playerColor;
+            else if (damageFlag == 2 || damageFlag == 3)
+                color = allyColor;
+            else if (damageFlag == 4)
+                color = enemyColor;
+
             var mc:FloatingDamageNumber = new FloatingDamageNumber(
-                formatDamage(damage, damageFlag),
-                damage
+                '-' + damage.toString(),
+                damage,
+                color,
+                fontSize
             );
             mc.visible = false;
             addChild(mc);
@@ -42,20 +54,6 @@ package com.flyingdamage
                 return;
             mc.dispose();
             delete _numbers[id];
-        }
-
-        private function formatDamage(value:int, damageFlag:int):String
-        {
-            var color:String = '#FFFFFF';
-            if (damageFlag == 1)
-                color = '#FFDD66';
-            else if (damageFlag == 2)
-                color = '#99CCFF';
-            else if (damageFlag == 3)
-                color = '#99FF99';
-            else if (damageFlag == 4)
-                color = '#FF6666';
-            return '<font color="' + color + '">-' + value.toString() + '</font>';
         }
     }
 }
