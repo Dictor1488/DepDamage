@@ -3,11 +3,15 @@
 
 import logging
 
-from gui.modsSettingsApi import g_modsSettingsApi
 from . import hooks
 
 LOG = logging.getLogger('DepDamage')
 MOD_LINKAGE = 'depdamage'
+
+try:
+    from gui.modsSettingsApi import g_modsSettingsApi
+except ImportError:
+    g_modsSettingsApi = None
 
 DEFAULTS = {
     'enabled': True,
@@ -131,6 +135,14 @@ def _on_changed(linkage, newSettings):
 
 def init():
     global SETTINGS
+
+    hooks.DepDamageFlashMeta.as_createDamage = _as_create_damage
+
+    if g_modsSettingsApi is None:
+        _apply()
+        LOG.warning('[DepDamage] ModsSettingsAPI not found; using built-in defaults')
+        return
+
     saved = g_modsSettingsApi.getModSettings(MOD_LINKAGE, TEMPLATE)
     if saved:
         SETTINGS.update(saved)
@@ -140,6 +152,5 @@ def init():
         if created:
             SETTINGS.update(created)
 
-    hooks.DepDamageFlashMeta.as_createDamage = _as_create_damage
     _apply()
     LOG.info('[DepDamage] in-game settings registered')
