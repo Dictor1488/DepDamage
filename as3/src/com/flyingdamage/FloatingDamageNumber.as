@@ -3,7 +3,6 @@ package com.flyingdamage
     import flash.display.Sprite;
     import flash.events.Event;
     import flash.filters.GlowFilter;
-    import flash.geom.Point;
     import flash.text.AntiAliasType;
     import flash.text.TextField;
     import flash.text.TextFormat;
@@ -14,9 +13,9 @@ package com.flyingdamage
         private var _tf:TextField;
         private var _startTime:int;
         private var _duration:Number;
-        private var _maxRange:Number;
+        private var _startY:Number;
+        private var _endY:Number;
         private var _damage:int;
-        private var _stageStart:Point;
 
         public function FloatingDamageNumber(text:String, damage:int, xPos:Number, yPos:Number, speed:Number, maxRange:Number)
         {
@@ -27,7 +26,8 @@ package com.flyingdamage
             alpha = 0;
             _damage = damage;
             _duration = Math.max(0.1, speed) * 1000;
-            _maxRange = maxRange;
+            _startY = yPos;
+            _endY = yPos - maxRange;
 
             _tf = new TextField();
             _tf.mouseEnabled = false;
@@ -59,16 +59,6 @@ package com.flyingdamage
 
         private function onFrame(e:Event):void
         {
-            if (parent == null)
-                return;
-
-            // Capture the spawn point once in stage/global coordinates. Every
-            // following frame converts that fixed point back into the current
-            // parent space. This cancels any movement of the overlay/root caused
-            // by the battle camera while preserving the vertical screen animation.
-            if (_stageStart == null)
-                _stageStart = parent.localToGlobal(new Point(x, y));
-
             var t:Number = (getTimer() - _startTime) / _duration;
             if (t >= 1)
             {
@@ -76,13 +66,10 @@ package com.flyingdamage
                 return;
             }
 
-            var stagePoint:Point = new Point(
-                _stageStart.x,
-                _stageStart.y - (_maxRange * t)
-            );
-            var localPoint:Point = parent.globalToLocal(stagePoint);
-            x = localPoint.x;
-            y = localPoint.y;
+            // The parent movie now lives in the fixed battle HUD plane, so only
+            // local Y is animated. No marker, vehicle or camera coordinates are
+            // consulted after spawn.
+            y = _startY + (_endY - _startY) * t;
 
             if (t < 0.15)
                 alpha = t / 0.15;
