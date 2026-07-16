@@ -4,7 +4,7 @@
 import logging
 
 from gui.modsSettingsApi import g_modsSettingsApi
-from flyingdamage import hooks
+from . import hooks
 
 LOG = logging.getLogger('DepDamage')
 MOD_LINKAGE = 'depdamage'
