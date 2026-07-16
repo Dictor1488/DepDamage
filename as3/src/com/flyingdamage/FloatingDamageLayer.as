@@ -15,24 +15,36 @@ package com.flyingdamage
 
         public function createDamage(id:int, damage:int, damageFlag:int,
                                      playerColor:String, allyColor:String,
-                                     enemyColor:String, fontSize:int):void
+                                     enemyColor:String, allyFireColor:String,
+                                     enemyFireColor:String, fontSize:int):void
         {
             removeDamage(id);
             if (damage <= 0)
                 return;
 
+            var isFire:Boolean = damageFlag >= 10;
+            var sourceFlag:int = isFire ? damageFlag - 10 : damageFlag;
             var color:String = 'FFFFFF';
 
-            // The flag describes who caused the hit. Translate that to the
-            // damaged target colour requested by the user:
-            // player hit -> yellow; ally hit -> enemy target -> red;
-            // enemy hit -> allied target -> green.
-            if (damageFlag == 1)
-                color = playerColor;
-            else if (damageFlag == 2 || damageFlag == 3)
-                color = enemyColor;
-            else if (damageFlag == 4)
-                color = allyColor;
+            // The flag describes who caused the hit, so translate it to the
+            // damaged target side. Player/allied source damages an enemy;
+            // enemy source damages an ally.
+            if (isFire)
+            {
+                if (sourceFlag == 1 || sourceFlag == 2 || sourceFlag == 3)
+                    color = enemyFireColor;
+                else if (sourceFlag == 4)
+                    color = allyFireColor;
+            }
+            else
+            {
+                if (sourceFlag == 1)
+                    color = playerColor;
+                else if (sourceFlag == 2 || sourceFlag == 3)
+                    color = enemyColor;
+                else if (sourceFlag == 4)
+                    color = allyColor;
+            }
 
             var mc:FloatingDamageNumber = new FloatingDamageNumber(
                 '-' + damage.toString(),
