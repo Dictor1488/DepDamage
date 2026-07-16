@@ -2,11 +2,10 @@ package com.flyingdamage
 {
     import flash.display.Sprite;
     import flash.utils.Dictionary;
-    import flash.utils.getTimer;
 
     public final class FloatingDamageLayer extends Sprite
     {
-        private var _lastByAttacker:Dictionary = new Dictionary();
+        private var _numbers:Dictionary = new Dictionary();
 
         public function FloatingDamageLayer()
         {
@@ -14,38 +13,35 @@ package com.flyingdamage
             mouseChildren = false;
         }
 
-        public function showDamage(damage:int, attackerID:Number, damageType:String, damageFlag:int, xPos:Number = 0, yPos:Number = -67):void
+        public function createDamage(id:int, damage:int, damageFlag:int):void
         {
+            removeDamage(id);
             if (damage <= 0)
                 return;
 
-            var key:String = String(attackerID) + ':' + damageType;
-            var now:int = getTimer();
-            var prev:Object = _lastByAttacker[key];
-
-            if (prev && prev.mc && prev.mc.parent && (now - prev.time) < FlyingDamageConfig.MERGE_TIME_MS)
-            {
-                prev.damage += damage;
-                prev.time = now;
-                prev.mc.setDamage(prev.damage, formatDamage(prev.damage, damageFlag));
-                return;
-            }
-
             var mc:FloatingDamageNumber = new FloatingDamageNumber(
                 formatDamage(damage, damageFlag),
-                damage,
-                xPos,
-                yPos,
-                FlyingDamageConfig.DEFAULT_SPEED,
-                FlyingDamageConfig.DEFAULT_MAX_RANGE
+                damage
             );
+            mc.visible = false;
             addChild(mc);
+            _numbers[id] = mc;
+        }
 
-            _lastByAttacker[key] = {
-                mc: mc,
-                damage: damage,
-                time: now
-            };
+        public function updateDamage(id:int, xPos:Number, yPos:Number, alphaValue:Number, isVisible:Boolean):void
+        {
+            var mc:FloatingDamageNumber = _numbers[id] as FloatingDamageNumber;
+            if (mc)
+                mc.updateScreenPosition(xPos, yPos, alphaValue, isVisible);
+        }
+
+        public function removeDamage(id:int):void
+        {
+            var mc:FloatingDamageNumber = _numbers[id] as FloatingDamageNumber;
+            if (!mc)
+                return;
+            mc.dispose();
+            delete _numbers[id];
         }
 
         private function formatDamage(value:int, damageFlag:int):String
@@ -55,9 +51,11 @@ package com.flyingdamage
                 color = '#FFDD66';
             else if (damageFlag == 2)
                 color = '#99CCFF';
+            else if (damageFlag == 3)
+                color = '#99FF99';
             else if (damageFlag == 4)
                 color = '#FF6666';
-            return '<font color="' + color + '">' + value.toString() + '</font>';
+            return '<font color="' + color + '">-' + value.toString() + '</font>';
         }
     }
 }
