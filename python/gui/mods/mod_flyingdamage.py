@@ -20,4 +20,5 @@ def init():
 
 def fini():
     LOG.info('[DepDamage] fini')
+    settings.fini()
     hooks.fini()
