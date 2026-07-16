@@ -22,6 +22,8 @@ DEFAULTS = {
     'enemyFireColor': '981F1F',
     'fontSize': 22,
     'animationDuration': 1.45,
+    'animationSmoothness': 90,
+    'appearanceDelay': 0.06,
     'spawnHeight': 2.5,
 }
 
@@ -92,6 +94,26 @@ TEMPLATE = {
         },
         {
             'type': 'Slider',
+            'text': 'Плавність анімації',
+            'minimum': 30,
+            'maximum': 120,
+            'snapInterval': 10,
+            'value': DEFAULTS['animationSmoothness'],
+            'format': '{{value}} FPS',
+            'varName': 'animationSmoothness'
+        },
+        {
+            'type': 'Slider',
+            'text': 'Затримка появи / об’єднання',
+            'minimum': 0.0,
+            'maximum': 0.3,
+            'snapInterval': 0.01,
+            'value': DEFAULTS['appearanceDelay'],
+            'format': '{{value}} с',
+            'varName': 'appearanceDelay'
+        },
+        {
+            'type': 'Slider',
             'text': 'Висота появи над танком',
             'minimum': 0.0,
             'maximum': 4.0,
@@ -121,7 +143,17 @@ def _apply():
         0.1,
         float(SETTINGS.get('animationDuration', DEFAULTS['animationDuration']))
     )
-    hooks._FlashDamageNumber.TICK = 0.016
+
+    smoothness = max(
+        30.0,
+        min(120.0, float(SETTINGS.get('animationSmoothness', DEFAULTS['animationSmoothness'])))
+    )
+    hooks._FlashDamageNumber.TICK = 1.0 / smoothness
+
+    hooks.FlashDamageOverlay.MERGE_WINDOW = max(
+        0.0,
+        min(0.3, float(SETTINGS.get('appearanceDelay', DEFAULTS['appearanceDelay'])))
+    )
     hooks.FlashDamageOverlay.SPAWN_HEIGHT = max(
         0.0,
         float(SETTINGS.get('spawnHeight', DEFAULTS['spawnHeight']))
