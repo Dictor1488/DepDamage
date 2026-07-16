@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Floating damage hooks rendered in native fixed screen-space GUI."""
+"""Floating damage hooks rendered from a frozen world-space hit point."""
 
 import logging
 
@@ -33,17 +33,17 @@ _LAST_HEALTH = {}
 
 
 class _NativeDamageNumber(object):
-    """One completely detached number drawn as a native GUI root."""
+    """One number detached from the vehicle but anchored to a frozen world point."""
 
     DURATION = 1.15
-    RISE = 0.13
+    WORLD_RISE = 2.2
     TICK = 0.016
 
-    def __init__(self, x, y, damage, damageFlag, onDispose):
-        self._startX = float(x)
-        self._startY = float(y)
+    def __init__(self, worldPoint, damage, damageFlag, projector, onDispose):
+        self._worldPoint = Math.Vector3(worldPoint.x, worldPoint.y, worldPoint.z)
         self._startTime = BigWorld.time()
         self._damageFlag = damageFlag
+        self._projector = projector
         self._callbackID = None
         self._disposed = False
         self._onDispose = onDispose
@@ -51,14 +51,13 @@ class _NativeDamageNumber(object):
         self._text = GUI.Text('-{}'.format(int(damage)))
         self._text.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
         self._text.verticalAnchor = GUI.Simple.eVAnchor.CENTER
-        self._text.position = (self._startX, self._startY, 0.02)
         self._text.font = 'default_medium.font'
         self._text.materialFX = GUI.Simple.eMaterialFX.ADD
         self._text.colour = self._getColour(0.0)
-        self._text.visible = True
+        self._text.visible = False
         GUI.addRoot(self._text)
 
-        self._schedule()
+        self._tick()
 
     def _baseRGB(self):
         if self._damageFlag == FROM_PLAYER:
@@ -95,13 +94,20 @@ class _NativeDamageNumber(object):
             self.dispose()
             return
 
-        # Coordinates are frozen at spawn. Only native screen-space Y changes.
-        self._text.position = (
-            self._startX,
-            self._startY + self.RISE * progress,
-            0.02
+        # Freeze X/Z at the impact location. Only world-space height changes.
+        # The point is projected again every frame, so turning the camera moves
+        # the number exactly like a stationary object in the world, not like HUD.
+        point = Math.Vector3(
+            self._worldPoint.x,
+            self._worldPoint.y + self.WORLD_RISE * progress,
+            self._worldPoint.z
         )
-        self._text.colour = self._getColour(progress)
+        projected, visible = self._projector(point)
+        self._text.visible = bool(visible)
+        if visible:
+            self._text.position = (projected.x, projected.y, 0.02)
+            self._text.colour = self._getColour(progress)
+
         self._schedule()
 
     def dispose(self):
@@ -125,19 +131,20 @@ class _NativeDamageNumber(object):
 
         callback = self._onDispose
         self._onDispose = None
+        self._projector = None
         if callback is not None:
             callback(self)
 
 
 class NativeDamageOverlay(object):
-    """Projects the marker once, then hands animation to fixed native GUI roots."""
+    """Captures a marker world point once and animates from that frozen point."""
 
     def __init__(self, vehicleMarkerClass):
         self._vehicleMarkerClass = vehicleMarkerClass
         self._viewProjection = Math.Matrix()
         self._tempMatrix = Math.Matrix()
         self._numbers = set()
-        LOG.info('[DepDamage] native screen-space overlay created')
+        LOG.info('[DepDamage] frozen world-point overlay created')
 
     def close(self):
         for number in tuple(self._numbers):
@@ -156,21 +163,21 @@ class NativeDamageOverlay(object):
             provider = self._vehicleMarkerClass.fetchMatrixProvider(vehicle)
             self._tempMatrix.set(provider)
             point = self._tempMatrix.translation
-            projected, visible = self._projectPoint(point)
+            _, visible = self._projectPoint(point)
             if not visible:
                 return False
 
             number = _NativeDamageNumber(
-                projected.x,
-                projected.y,
+                point,
                 damage,
                 damageFlag,
+                self._projectPoint,
                 self._removeNumber
             )
             self._numbers.add(number)
             return True
         except Exception:
-            LOG.exception('[DepDamage] failed to show native damage number')
+            LOG.exception('[DepDamage] failed to show frozen world damage number')
             return False
 
     def _projectPoint(self, point):
@@ -253,7 +260,7 @@ def _start_hook(self, *args, **kwargs):
         if _OVERLAY is None:
             _OVERLAY = NativeDamageOverlay(self._clazz)
     except Exception:
-        LOG.exception('[DepDamage] failed to create native overlay')
+        LOG.exception('[DepDamage] failed to create frozen world overlay')
     return result
 
 
@@ -265,7 +272,7 @@ def _stop_hook(self, *args, **kwargs):
             _OVERLAY = None
         _LAST_HEALTH.clear()
     except Exception:
-        LOG.exception('[DepDamage] failed to close native overlay')
+        LOG.exception('[DepDamage] failed to close frozen world overlay')
     return _ORIGINAL_STOP(self, *args, **kwargs)
 
 
@@ -286,7 +293,6 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
             markerHealth < 0 and isAmmoBayDestroyed and not aInfo):
         markerHealth = 0
 
-    # Preserve the stock HP value/bar, but do not invoke stock floating damage.
     self._setHealthMarker(vehicleID, handle, markerHealth)
     _LAST_HEALTH[vehicleID] = normalizedHealth
 
@@ -306,7 +312,7 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         damageType = _safe_attack_reason(attackReasonID)
         _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
     except Exception:
-        LOG.exception('[DepDamage] updateVehicleHealth native overlay hook failed')
+        LOG.exception('[DepDamage] updateVehicleHealth frozen world hook failed')
 
     return None
 
@@ -328,7 +334,7 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] native fixed-root damage renderer patched')
+    LOG.info('[DepDamage] frozen world-point damage renderer patched')
 
 
 def init():
@@ -347,6 +353,6 @@ def fini():
             _OVERLAY.close()
             _OVERLAY = None
     except Exception:
-        LOG.exception('[DepDamage] native overlay close failed during fini')
+        LOG.exception('[DepDamage] frozen world overlay close failed during fini')
     _LAST_HEALTH.clear()
     LOG.info('[DepDamage] hooks disabled')
