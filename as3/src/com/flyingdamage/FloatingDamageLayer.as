@@ -22,12 +22,17 @@ package com.flyingdamage
                 return;
 
             var color:String = 'FFFFFF';
+
+            // The flag describes who caused the hit. Translate that to the
+            // damaged target colour requested by the user:
+            // player hit -> yellow; ally hit -> enemy target -> red;
+            // enemy hit -> allied target -> green.
             if (damageFlag == 1)
                 color = playerColor;
             else if (damageFlag == 2 || damageFlag == 3)
-                color = allyColor;
-            else if (damageFlag == 4)
                 color = enemyColor;
+            else if (damageFlag == 4)
+                color = allyColor;
 
             var mc:FloatingDamageNumber = new FloatingDamageNumber(
                 '-' + damage.toString(),
