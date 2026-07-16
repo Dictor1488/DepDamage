@@ -217,10 +217,6 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
     normalizedHealth = max(int(newHealth), 0)
     oldHealth = _LAST_HEALTH.get(vehicleID)
 
-    # Do not call the stock _updateVehicleHealth here. It forwards damage type,
-    # attack reason and ramming data to updateHealth, which creates the game's
-    # original camera-bound floating number. Update only the HP bar, then draw
-    # the detached number in our fixed screen overlay.
     markerHealth = newHealth
     isAmmoBayDestroyed = constants.SPECIAL_VEHICLE_HEALTH.IS_AMMO_BAY_DESTROYED(markerHealth)
     if markerHealth < 0 and not isAmmoBayDestroyed:
@@ -229,11 +225,10 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
             markerHealth < 0 and isAmmoBayDestroyed and not aInfo):
         markerHealth = 0
 
-    if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
-        self._setHealthMarker(vehicleID, handle, markerHealth)
-    else:
-        self._updateHealthMarker(vehicleID, handle, markerHealth)
-
+    # setHealth updates the displayed HP value/bar without invoking the stock
+    # damage animation. updateHealth requires 3-4 AS arguments and is precisely
+    # the method that creates the camera-bound stock floating number.
+    self._setHealthMarker(vehicleID, handle, markerHealth)
     _LAST_HEALTH[vehicleID] = normalizedHealth
 
     if not _ENABLED or oldHealth is None:
@@ -250,7 +245,9 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         attackerID = aInfo.vehicleID if aInfo else 0
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
         damageType = _safe_attack_reason(attackReasonID)
-        _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
+        shown = _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
+        if not shown:
+            LOG.debug('[DepDamage] detached number skipped: vehicle=%s damage=%s', vehicleID, damage)
     except Exception:
         LOG.exception('[DepDamage] updateVehicleHealth overlay hook failed')
 
