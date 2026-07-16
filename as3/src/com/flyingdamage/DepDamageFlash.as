@@ -24,9 +24,11 @@ package com.flyingdamage
             this.y = SWF_HALF_HEIGHT - (screenHeight / 2.0);
         }
 
-        public function as_createDamage(id:int, damage:int, damageFlag:int):void
+        public function as_createDamage(id:int, damage:int, damageFlag:int,
+                                        playerColor:String, allyColor:String,
+                                        enemyColor:String, fontSize:int):void
         {
-            _layer.createDamage(id, damage, damageFlag);
+            _layer.createDamage(id, damage, damageFlag, playerColor, allyColor, enemyColor, fontSize);
         }
 
         public function as_updateDamage(id:int, xPos:Number, yPos:Number, alphaValue:Number, isVisible:Boolean):void
@@ -39,12 +41,7 @@ package com.flyingdamage
             _layer.removeDamage(id);
         }
 
-        public function as_populate():void
-        {
-        }
-
-        public function as_dispose():void
-        {
-        }
+        public function as_populate():void {}
+        public function as_dispose():void {}
     }
 }
