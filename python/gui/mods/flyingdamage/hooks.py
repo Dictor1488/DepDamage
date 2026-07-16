@@ -1,20 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Standalone floating-damage hooks and screen overlay runtime."""
+"""Floating damage hooks rendered in native fixed screen-space GUI."""
 
 import logging
 
 import BigWorld
 import GUI
 import Math
-import SCALEFORM
 import constants
 
 from BattleReplay import g_replayCtrl
 from constants import ATTACK_REASONS
 from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
-from gui.Scaleform.daapi.view.external_components import ExternalFlashComponent, ExternalFlashSettings
-from gui.Scaleform.flash_wrapper import InputKeyMode
-from gui.Scaleform.framework.entities.BaseDAAPIModule import BaseDAAPIModule
 from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 from helpers import dependency
 from skeletons.gui.battle_session import IBattleSessionProvider
@@ -36,55 +32,128 @@ _OVERLAY = None
 _LAST_HEALTH = {}
 
 
-class DepDamageFlashMeta(BaseDAAPIModule):
+class _NativeDamageNumber(object):
+    """One completely detached number drawn as a native GUI root."""
 
-    def as_showDamage(self, screenWidth, screenHeight, x, y, damage, attackerID, damageType, damageFlag):
-        if self._isDAAPIInited():
-            return self.flashObject.as_showDamage(
-                screenWidth, screenHeight, x, y, damage, attackerID, damageType, damageFlag
-            )
+    DURATION = 1.15
+    RISE = 0.13
+    TICK = 0.016
+
+    def __init__(self, x, y, damage, damageFlag, onDispose):
+        self._startX = float(x)
+        self._startY = float(y)
+        self._startTime = BigWorld.time()
+        self._callbackID = None
+        self._disposed = False
+        self._onDispose = onDispose
+
+        self._text = GUI.Text('-{}'.format(int(damage)))
+        self._text.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
+        self._text.verticalAnchor = GUI.Simple.eVAnchor.CENTER
+        self._text.position = (self._startX, self._startY, 0.02)
+        self._text.font = 'default_medium.font'
+        self._text.materialFX = GUI.Simple.eMaterialFX.ADD
+        self._text.colour = self._getColour(damageFlag, 0.0)
+        self._text.visible = True
+        GUI.addRoot(self._text)
+
+        self._schedule()
+
+    @staticmethod
+    def _baseRGB(damageFlag):
+        if damageFlag == FROM_PLAYER:
+            return (255.0, 220.0, 80.0)
+        if damageFlag == FROM_SQUAD:
+            return (120.0, 220.0, 255.0)
+        if damageFlag == FROM_ALLY:
+            return (120.0, 255.0, 120.0)
+        if damageFlag == FROM_ENEMY:
+            return (255.0, 120.0, 120.0)
+        return (255.0, 255.0, 255.0)
+
+    def _getColour(self, damageFlag, progress):
+        if progress < 0.12:
+            alpha = progress / 0.12
+        elif progress > 0.72:
+            alpha = max(0.0, 1.0 - (progress - 0.72) / 0.28)
+        else:
+            alpha = 1.0
+        r, g, b = self._baseRGB(damageFlag)
+        return (r, g, b, 255.0 * alpha)
+
+    def _schedule(self):
+        if not self._disposed:
+            self._callbackID = BigWorld.callback(self.TICK, self._tick)
+
+    def _tick(self):
+        self._callbackID = None
+        if self._disposed:
+            return
+
+        progress = (BigWorld.time() - self._startTime) / self.DURATION
+        if progress >= 1.0:
+            self.dispose()
+            return
+
+        # Coordinates are frozen at spawn. Only native screen-space Y changes.
+        self._text.position = (
+            self._startX,
+            self._startY + self.RISE * progress,
+            0.02
+        )
+        self._text.colour = self._getColour(self._damageFlag, progress)
+        self._schedule()
+
+    def dispose(self):
+        if self._disposed:
+            return
+        self._disposed = True
+
+        if self._callbackID is not None:
+            try:
+                BigWorld.cancelCallback(self._callbackID)
+            except Exception:
+                pass
+            self._callbackID = None
+
+        if self._text is not None:
+            try:
+                GUI.delRoot(self._text)
+            except Exception:
+                pass
+            self._text = None
+
+        callback = self._onDispose
+        self._onDispose = None
+        if callback is not None:
+            callback(self)
+
+    @property
+    def _damageFlag(self):
+        return self.__damageFlag
+
+    @_damageFlag.setter
+    def _damageFlag(self, value):
+        self.__damageFlag = value
 
 
-class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
+class NativeDamageOverlay(object):
+    """Projects the marker once, then hands animation to fixed native GUI roots."""
 
     def __init__(self, vehicleMarkerClass):
-        super(DepDamageFlash, self).__init__(
-            ExternalFlashSettings('DepDamageFlash', 'DepDamageFlash.swf', 'root', None)
-        )
         self._vehicleMarkerClass = vehicleMarkerClass
         self._viewProjection = Math.Matrix()
         self._tempMatrix = Math.Matrix()
-        self._screenWindow = None
-
-        self.createExternalComponent()
-        self.movie.backgroundAlpha = 0.0
-        self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
-        self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
-        self.component.focus = False
-        self.component.moveFocus = False
-
-        self._screenWindow = GUI.Window()
-        self._screenWindow.position = (0.0, 0.0, 0.15)
-        self._screenWindow.size = (2.0, 2.0)
-        self._screenWindow.visible = True
-        self._screenWindow.addChild(self.component, 'depDamageFlash')
-        GUI.addRoot(self._screenWindow)
-        LOG.info('[DepDamage] WindowGUIComponent screen root attached')
+        self._numbers = set()
+        LOG.info('[DepDamage] native screen-space overlay created')
 
     def close(self):
-        try:
-            if self._screenWindow is not None:
-                try:
-                    self._screenWindow.delChild(self.component)
-                except Exception:
-                    pass
-                try:
-                    GUI.delRoot(self._screenWindow)
-                except Exception:
-                    pass
-                self._screenWindow = None
-        finally:
-            super(DepDamageFlash, self).close()
+        for number in tuple(self._numbers):
+            number.dispose()
+        self._numbers.clear()
+
+    def _removeNumber(self, number):
+        self._numbers.discard(number)
 
     def showDamage(self, vehicleID, damage, attackerID, damageType, damageFlag):
         try:
@@ -99,16 +168,18 @@ class DepDamageFlash(ExternalFlashComponent, DepDamageFlashMeta):
             if not visible:
                 return False
 
-            screenWidth, screenHeight = GUI.screenResolution()
-            x = (0.5 + 0.5 * projected.x) * screenWidth
-            y = (0.5 - 0.5 * projected.y) * screenHeight
-            self.as_showDamage(
-                screenWidth, screenHeight, x, y,
-                int(damage), attackerID, damageType, int(damageFlag)
+            number = _NativeDamageNumber(
+                projected.x,
+                projected.y,
+                damage,
+                damageFlag,
+                self._removeNumber
             )
+            number._damageFlag = damageFlag
+            self._numbers.add(number)
             return True
         except Exception:
-            LOG.exception('[DepDamage] failed to project/show damage')
+            LOG.exception('[DepDamage] failed to show native damage number')
             return False
 
     def _projectPoint(self, point):
@@ -189,10 +260,9 @@ def _start_hook(self, *args, **kwargs):
     try:
         global _OVERLAY
         if _OVERLAY is None:
-            _OVERLAY = DepDamageFlash(self._clazz)
-            LOG.info('[DepDamage] fixed window overlay created')
+            _OVERLAY = NativeDamageOverlay(self._clazz)
     except Exception:
-        LOG.exception('[DepDamage] failed to create screen overlay')
+        LOG.exception('[DepDamage] failed to create native overlay')
     return result
 
 
@@ -204,7 +274,7 @@ def _stop_hook(self, *args, **kwargs):
             _OVERLAY = None
         _LAST_HEALTH.clear()
     except Exception:
-        LOG.exception('[DepDamage] failed to close screen overlay')
+        LOG.exception('[DepDamage] failed to close native overlay')
     return _ORIGINAL_STOP(self, *args, **kwargs)
 
 
@@ -225,9 +295,7 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
             markerHealth < 0 and isAmmoBayDestroyed and not aInfo):
         markerHealth = 0
 
-    # setHealth updates the displayed HP value/bar without invoking the stock
-    # damage animation. updateHealth requires 3-4 AS arguments and is precisely
-    # the method that creates the camera-bound stock floating number.
+    # Preserve the stock HP value/bar, but do not invoke stock floating damage.
     self._setHealthMarker(vehicleID, handle, markerHealth)
     _LAST_HEALTH[vehicleID] = normalizedHealth
 
@@ -245,11 +313,9 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         attackerID = aInfo.vehicleID if aInfo else 0
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
         damageType = _safe_attack_reason(attackReasonID)
-        shown = _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
-        if not shown:
-            LOG.debug('[DepDamage] detached number skipped: vehicle=%s damage=%s', vehicleID, damage)
+        _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
     except Exception:
-        LOG.exception('[DepDamage] updateVehicleHealth overlay hook failed')
+        LOG.exception('[DepDamage] updateVehicleHealth native overlay hook failed')
 
     return None
 
@@ -271,7 +337,7 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] stock damage animation suppressed; detached overlay patched')
+    LOG.info('[DepDamage] native fixed-root damage renderer patched')
 
 
 def init():
@@ -290,6 +356,6 @@ def fini():
             _OVERLAY.close()
             _OVERLAY = None
     except Exception:
-        LOG.exception('[DepDamage] overlay close failed during fini')
+        LOG.exception('[DepDamage] native overlay close failed during fini')
     _LAST_HEALTH.clear()
     LOG.info('[DepDamage] hooks disabled')
