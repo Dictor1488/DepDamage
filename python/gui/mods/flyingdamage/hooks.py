@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Floating damage hooks rendered from a frozen world-space hit point."""
+"""Floating damage hooks with frozen world motion and Flash text styling."""
 
 import logging
 
 import BigWorld
 import GUI
 import Math
+import SCALEFORM
 import constants
 
 from BattleReplay import g_replayCtrl
 from constants import ATTACK_REASONS
 from gui.Scaleform.daapi.view.battle.shared.markers2d.vehicle_plugins import VehicleMarkerPlugin
+from gui.Scaleform.daapi.view.external_components import ExternalFlashComponent, ExternalFlashSettings
+from gui.Scaleform.flash_wrapper import InputKeyMode
+from gui.Scaleform.framework.entities.BaseDAAPIModule import BaseDAAPIModule
 from gui.battle_control.battle_constants import PLAYER_GUI_PROPS
 from helpers import dependency
 from skeletons.gui.battle_session import IBattleSessionProvider
@@ -32,63 +36,47 @@ _OVERLAY = None
 _LAST_HEALTH = {}
 
 
-class _NativeDamageNumber(object):
-    """One number detached from the vehicle and anchored to a frozen world point."""
+class DepDamageFlashMeta(BaseDAAPIModule):
 
+    def as_configureScreen(self, screenWidth, screenHeight):
+        if self._isDAAPIInited():
+            return self.flashObject.as_configureScreen(screenWidth, screenHeight)
+
+    def as_createDamage(self, numberID, damage, damageFlag):
+        if self._isDAAPIInited():
+            return self.flashObject.as_createDamage(numberID, damage, damageFlag)
+
+    def as_updateDamage(self, numberID, x, y, alpha, visible):
+        if self._isDAAPIInited():
+            return self.flashObject.as_updateDamage(numberID, x, y, alpha, visible)
+
+    def as_removeDamage(self, numberID):
+        if self._isDAAPIInited():
+            return self.flashObject.as_removeDamage(numberID)
+
+
+class _FlashDamageNumber(object):
     DURATION = 2.0
     WORLD_RISE = 1.45
     TICK = 0.025
-    SHADOW_OFFSET_X = 0.0016
-    SHADOW_OFFSET_Y = -0.0016
 
-    def __init__(self, worldPoint, damage, damageFlag, projector, onDispose):
+    def __init__(self, numberID, worldPoint, damage, damageFlag, overlay, projector, onDispose):
+        self._numberID = int(numberID)
         self._worldPoint = Math.Vector3(worldPoint.x, worldPoint.y, worldPoint.z)
         self._startTime = BigWorld.time()
-        self._damageFlag = damageFlag
+        self._overlay = overlay
         self._projector = projector
         self._callbackID = None
         self._disposed = False
         self._onDispose = onDispose
 
-        value = '-{}'.format(int(damage))
-
-        # One compact soft shadow instead of the previous eight-layer outline.
-        self._shadow = GUI.Text(value)
-        self._shadow.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
-        self._shadow.verticalAnchor = GUI.Simple.eVAnchor.CENTER
-        self._shadow.font = 'default_medium.font'
-        self._shadow.colour = (0.0, 0.0, 0.0, 190.0)
-        self._shadow.visible = False
-        GUI.addRoot(self._shadow)
-
-        self._text = GUI.Text(value)
-        self._text.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
-        self._text.verticalAnchor = GUI.Simple.eVAnchor.CENTER
-        self._text.font = 'default_medium.font'
-        self._text.colour = self._getColour(0.0)
-        self._text.visible = False
-        GUI.addRoot(self._text)
+        self._overlay.createLabel(self._numberID, int(damage), int(damageFlag))
         self._tick()
-
-    def _baseRGB(self):
-        if self._damageFlag == FROM_PLAYER:
-            return (255.0, 235.0, 170.0)
-        if self._damageFlag == FROM_SQUAD:
-            return (170.0, 220.0, 255.0)
-        if self._damageFlag == FROM_ALLY:
-            return (180.0, 255.0, 180.0)
-        if self._damageFlag == FROM_ENEMY:
-            return (255.0, 170.0, 170.0)
-        return (255.0, 255.0, 255.0)
 
     def _alpha(self, progress):
         if progress > 0.78:
             return max(0.0, 1.0 - (progress - 0.78) / 0.22)
         return 1.0
-
-    def _getColour(self, progress):
-        r, g, b = self._baseRGB()
-        return (r, g, b, 255.0 * self._alpha(progress))
 
     def _schedule(self):
         if not self._disposed:
@@ -111,20 +99,13 @@ class _NativeDamageNumber(object):
             self._worldPoint.z
         )
         projected, visible = self._projector(point)
-        visible = bool(visible)
-        alpha = 255.0 * self._alpha(progress)
-
-        self._shadow.visible = visible
-        self._text.visible = visible
         if visible:
-            self._shadow.position = (
-                projected.x + self.SHADOW_OFFSET_X,
-                projected.y + self.SHADOW_OFFSET_Y,
-                0.021
-            )
-            self._shadow.colour = (0.0, 0.0, 0.0, alpha * 0.78)
-            self._text.position = (projected.x, projected.y, 0.02)
-            self._text.colour = self._getColour(progress)
+            screenWidth, screenHeight = GUI.screenResolution()
+            x = (0.5 + 0.5 * projected.x) * screenWidth
+            y = (0.5 - 0.5 * projected.y) * screenHeight
+            self._overlay.updateLabel(self._numberID, x, y, self._alpha(progress), True)
+        else:
+            self._overlay.updateLabel(self._numberID, 0.0, 0.0, 0.0, False)
 
         self._schedule()
 
@@ -140,40 +121,71 @@ class _NativeDamageNumber(object):
                 pass
             self._callbackID = None
 
-        if self._shadow is not None:
-            try:
-                GUI.delRoot(self._shadow)
-            except Exception:
-                pass
-            self._shadow = None
-
-        if self._text is not None:
-            try:
-                GUI.delRoot(self._text)
-            except Exception:
-                pass
-            self._text = None
+        if self._overlay is not None:
+            self._overlay.removeLabel(self._numberID)
 
         callback = self._onDispose
         self._onDispose = None
+        self._overlay = None
         self._projector = None
         if callback is not None:
             callback(self)
 
 
-class NativeDamageOverlay(object):
-    """Captures a marker world point, merges burst hits, then animates one sum."""
+class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
+    """Merges hits in Python, projects a frozen world point, and renders in Flash."""
 
     SPAWN_HEIGHT = 0.75
     MERGE_WINDOW = 0.22
 
     def __init__(self, vehicleMarkerClass):
+        super(FlashDamageOverlay, self).__init__(
+            ExternalFlashSettings('DepDamageFlash', 'DepDamageFlash.swf', 'root', None)
+        )
         self._vehicleMarkerClass = vehicleMarkerClass
         self._viewProjection = Math.Matrix()
         self._tempMatrix = Math.Matrix()
         self._numbers = set()
         self._pending = {}
-        LOG.info('[DepDamage] clean soft-shadow overlay created')
+        self._nextNumberID = 1
+        self._screenWindow = None
+        self._configuredResolution = None
+
+        self.createExternalComponent()
+        self.movie.backgroundAlpha = 0.0
+        self.movie.scaleMode = SCALEFORM.eMovieScaleMode.NO_SCALE
+        self.component.wg_inputKeyMode = InputKeyMode.NO_HANDLE
+        self.component.focus = False
+        self.component.moveFocus = False
+        self.component.size = (2.0, 2.0)
+
+        self._screenWindow = GUI.Window()
+        self._screenWindow.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
+        self._screenWindow.verticalAnchor = GUI.Simple.eVAnchor.CENTER
+        self._screenWindow.position = (0.0, 0.0, 0.15)
+        self._screenWindow.size = (2.0, 2.0)
+        self._screenWindow.visible = True
+        self._screenWindow.addChild(self.component)
+        GUI.addRoot(self._screenWindow)
+
+        LOG.info('[DepDamage] exact ProTanki Flash shadow overlay created')
+
+    def _configureScreen(self):
+        resolution = GUI.screenResolution()
+        if resolution != self._configuredResolution:
+            self.as_configureScreen(resolution[0], resolution[1])
+            self._configuredResolution = resolution
+
+    def createLabel(self, numberID, damage, damageFlag):
+        self._configureScreen()
+        self.as_createDamage(numberID, damage, damageFlag)
+
+    def updateLabel(self, numberID, x, y, alpha, visible):
+        self._configureScreen()
+        self.as_updateDamage(numberID, x, y, alpha, visible)
+
+    def removeLabel(self, numberID):
+        self.as_removeDamage(numberID)
 
     def close(self):
         for pending in self._pending.values():
@@ -184,9 +196,24 @@ class NativeDamageOverlay(object):
                 except Exception:
                     pass
         self._pending.clear()
+
         for number in tuple(self._numbers):
             number.dispose()
         self._numbers.clear()
+
+        try:
+            if self._screenWindow is not None:
+                try:
+                    self._screenWindow.delChild(self.component)
+                except Exception:
+                    pass
+                try:
+                    GUI.delRoot(self._screenWindow)
+                except Exception:
+                    pass
+                self._screenWindow = None
+        finally:
+            super(FlashDamageOverlay, self).close()
 
     def _removeNumber(self, number):
         self._numbers.discard(number)
@@ -228,7 +255,7 @@ class NativeDamageOverlay(object):
             }
             return True
         except Exception:
-            LOG.exception('[DepDamage] failed to queue frozen world damage number')
+            LOG.exception('[DepDamage] failed to queue Flash damage number')
             return False
 
     def _flushPending(self, vehicleID):
@@ -236,16 +263,20 @@ class NativeDamageOverlay(object):
         if pending is None:
             return
         try:
-            number = _NativeDamageNumber(
+            numberID = self._nextNumberID
+            self._nextNumberID += 1
+            number = _FlashDamageNumber(
+                numberID,
                 pending['point'],
                 pending['damage'],
                 pending['damageFlag'],
+                self,
                 self._projectPoint,
                 self._removeNumber
             )
             self._numbers.add(number)
         except Exception:
-            LOG.exception('[DepDamage] failed to spawn merged damage number')
+            LOG.exception('[DepDamage] failed to spawn Flash damage number')
 
     def _projectPoint(self, point):
         camera = BigWorld.camera()
@@ -324,9 +355,9 @@ def _start_hook(self, *args, **kwargs):
     try:
         global _OVERLAY
         if _OVERLAY is None:
-            _OVERLAY = NativeDamageOverlay(self._clazz)
+            _OVERLAY = FlashDamageOverlay(self._clazz)
     except Exception:
-        LOG.exception('[DepDamage] failed to create frozen world overlay')
+        LOG.exception('[DepDamage] failed to create exact-style Flash overlay')
     return result
 
 
@@ -338,7 +369,7 @@ def _stop_hook(self, *args, **kwargs):
             _OVERLAY = None
         _LAST_HEALTH.clear()
     except Exception:
-        LOG.exception('[DepDamage] failed to close frozen world overlay')
+        LOG.exception('[DepDamage] failed to close Flash overlay')
     return _ORIGINAL_STOP(self, *args, **kwargs)
 
 
@@ -377,7 +408,7 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         damageType = _safe_attack_reason(attackReasonID)
         _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
     except Exception:
-        LOG.exception('[DepDamage] updateVehicleHealth frozen world hook failed')
+        LOG.exception('[DepDamage] updateVehicleHealth exact-style Flash hook failed')
     return None
 
 
@@ -398,7 +429,7 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] clean soft-shadow damage renderer patched')
+    LOG.info('[DepDamage] exact ProTanki DropShadowFilter renderer patched')
 
 
 def init():
@@ -417,6 +448,6 @@ def fini():
             _OVERLAY.close()
             _OVERLAY = None
     except Exception:
-        LOG.exception('[DepDamage] frozen world overlay close failed during fini')
+        LOG.exception('[DepDamage] Flash overlay close failed during fini')
     _LAST_HEALTH.clear()
     LOG.info('[DepDamage] hooks disabled')
