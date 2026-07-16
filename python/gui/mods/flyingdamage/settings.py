@@ -14,9 +14,9 @@ DEFAULTS = {
     'playerColor': 'FFD54A',
     'allyColor': '5BE36A',
     'enemyColor': 'FF5A5A',
-    'fontSize': 20,
-    'animationDuration': 2.0,
-    'spawnHeight': 0.75,
+    'fontSize': 22,
+    'animationDuration': 1.25,
+    'spawnHeight': 1.55,
 }
 
 SETTINGS = dict(DEFAULTS)
@@ -39,13 +39,13 @@ TEMPLATE = {
         },
         {
             'type': 'ColorChoice',
-            'text': 'Колір урону союзників',
+            'text': 'Колір урону по союзниках',
             'value': DEFAULTS['allyColor'],
             'varName': 'allyColor'
         },
         {
             'type': 'ColorChoice',
-            'text': 'Колір урону противників',
+            'text': 'Колір урону по противниках',
             'value': DEFAULTS['enemyColor'],
             'varName': 'enemyColor'
         }
@@ -64,18 +64,18 @@ TEMPLATE = {
         {
             'type': 'Slider',
             'text': 'Тривалість анімації',
-            'minimum': 0.8,
+            'minimum': 0.6,
             'maximum': 4.0,
-            'snapInterval': 0.1,
+            'snapInterval': 0.05,
             'value': DEFAULTS['animationDuration'],
             'format': '{{value}} с',
             'varName': 'animationDuration'
         },
         {
             'type': 'Slider',
-            'text': 'Висота появи',
+            'text': 'Висота появи над танком',
             'minimum': 0.0,
-            'maximum': 2.0,
+            'maximum': 3.0,
             'snapInterval': 0.05,
             'value': DEFAULTS['spawnHeight'],
             'format': '{{value}}',
@@ -98,8 +98,14 @@ def _clean_color(value, fallback):
 
 def _apply():
     hooks._ENABLED = bool(SETTINGS.get('enabled', True))
-    hooks._FlashDamageNumber.DURATION = max(0.1, float(SETTINGS.get('animationDuration', 2.0)))
-    hooks.FlashDamageOverlay.SPAWN_HEIGHT = max(0.0, float(SETTINGS.get('spawnHeight', 0.75)))
+    hooks._FlashDamageNumber.DURATION = max(
+        0.1,
+        float(SETTINGS.get('animationDuration', DEFAULTS['animationDuration']))
+    )
+    hooks.FlashDamageOverlay.SPAWN_HEIGHT = max(
+        0.0,
+        float(SETTINGS.get('spawnHeight', DEFAULTS['spawnHeight']))
+    )
 
 
 def _as_create_damage(self, numberID, damage, damageFlag):
