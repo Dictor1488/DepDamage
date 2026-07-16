@@ -11,11 +11,14 @@ package com.flyingdamage
         private var _tf:TextField;
         private var _damage:int;
 
-        public function FloatingDamageNumber(text:String, damage:int)
+        public function FloatingDamageNumber(text:String, damage:int, colorHex:String, fontSize:int)
         {
             mouseEnabled = false;
             mouseChildren = false;
             _damage = damage;
+
+            var color:uint = uint('0x' + colorHex);
+            var size:int = Math.max(14, Math.min(32, fontSize));
 
             _tf = new TextField();
             _tf.mouseEnabled = false;
@@ -25,9 +28,9 @@ package com.flyingdamage
             _tf.height = 80;
             _tf.defaultTextFormat = new TextFormat(
                 '$FieldFont',
-                18,
-                0xFFFFFF,
-                false,
+                size,
+                color,
+                true,
                 false,
                 false,
                 null,
@@ -35,38 +38,31 @@ package com.flyingdamage
                 'center'
             );
 
-            // Exact values from the supplied ProTanki vehicle-marker config:
-            // distance 1, angle 90, black, alpha 1, blur 4, strength 180.
+            // Clean readable style: slightly bold text with a soft black shadow.
             _tf.filters = [
                 new DropShadowFilter(
                     1,
                     90,
                     0x000000,
-                    1.0,
-                    4,
-                    4,
-                    180,
+                    0.85,
+                    3,
+                    3,
+                    2.2,
                     1,
                     false,
                     false,
                     false
                 )
             ];
-            _tf.htmlText = text;
+            _tf.text = text;
             _tf.x = -110;
-            _tf.y = -18;
+            _tf.y = -20;
             addChild(_tf);
         }
 
         public function get damage():int
         {
             return _damage;
-        }
-
-        public function setDamage(value:int, text:String):void
-        {
-            _damage = value;
-            _tf.htmlText = text;
         }
 
         public function updateScreenPosition(xPos:Number, yPos:Number, alphaValue:Number, isVisible:Boolean):void
