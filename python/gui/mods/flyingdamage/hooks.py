@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Floating damage hooks with frozen world motion and Flash text styling."""
+"""Floating damage hooks with smooth frozen-point motion and Flash styling."""
 
 import logging
 
@@ -24,6 +24,7 @@ FROM_PLAYER = 1
 FROM_SQUAD = 2
 FROM_ALLY = 3
 FROM_ENEMY = 4
+FIRE_FLAG_OFFSET = 10
 
 LOG = logging.getLogger('DepDamage')
 _ENABLED = False
@@ -33,6 +34,7 @@ _ORIGINAL_STOP = None
 _ORIGINAL_SET_HEALTH = None
 _ORIGINAL_UPDATE_HEALTH = None
 _OVERLAY = None
+_ACTIVE_PLUGIN = None
 _LAST_HEALTH = {}
 
 
@@ -56,43 +58,40 @@ class DepDamageFlashMeta(BaseDAAPIModule):
 
 
 class _FlashDamageNumber(object):
-    DURATION = 2.0
-    WORLD_RISE = 1.45
-    TICK = 0.025
+    DURATION = 1.45
+    WORLD_RISE = 0.55
+    SCREEN_RISE = 58.0
+    TICK = 1.0 / 120.0
 
-    def __init__(self, numberID, worldPoint, damage, damageFlag, overlay, projector, onDispose):
+    def __init__(self, numberID, worldPoint, damage, damageFlag, overlay, projector):
         self._numberID = int(numberID)
         self._worldPoint = Math.Vector3(worldPoint.x, worldPoint.y, worldPoint.z)
         self._startTime = BigWorld.time()
         self._overlay = overlay
         self._projector = projector
-        self._callbackID = None
         self._disposed = False
-        self._onDispose = onDispose
-
         self._overlay.createLabel(self._numberID, int(damage), int(damageFlag))
-        self._tick()
 
     def _alpha(self, progress):
-        if progress > 0.78:
-            return max(0.0, 1.0 - (progress - 0.78) / 0.22)
-        return 1.0
+        fadeStart = 0.72
+        if progress <= fadeStart:
+            return 1.0
+        fadeProgress = (progress - fadeStart) / (1.0 - fadeStart)
+        return max(0.0, 1.0 - fadeProgress * fadeProgress * (3.0 - 2.0 * fadeProgress))
 
-    def _schedule(self):
-        if not self._disposed:
-            self._callbackID = BigWorld.callback(self.TICK, self._tick)
-
-    def _tick(self):
-        self._callbackID = None
+    def update(self, now):
         if self._disposed:
-            return
+            return False
 
-        progress = (BigWorld.time() - self._startTime) / self.DURATION
+        duration = max(0.1, float(self.DURATION))
+        progress = (now - self._startTime) / duration
         if progress >= 1.0:
             self.dispose()
-            return
+            return False
+        if progress < 0.0:
+            progress = 0.0
 
-        eased = 1.0 - (1.0 - progress) * (1.0 - progress)
+        eased = progress * progress * (3.0 - 2.0 * progress)
         point = Math.Vector3(
             self._worldPoint.x,
             self._worldPoint.y + self.WORLD_RISE * eased,
@@ -102,41 +101,27 @@ class _FlashDamageNumber(object):
         if visible:
             screenWidth, screenHeight = GUI.screenResolution()
             x = (0.5 + 0.5 * projected.x) * screenWidth
-            y = (0.5 - 0.5 * projected.y) * screenHeight
+            y = (0.5 - 0.5 * projected.y) * screenHeight - self.SCREEN_RISE * eased
             self._overlay.updateLabel(self._numberID, x, y, self._alpha(progress), True)
         else:
             self._overlay.updateLabel(self._numberID, 0.0, 0.0, 0.0, False)
-
-        self._schedule()
+        return True
 
     def dispose(self):
         if self._disposed:
             return
         self._disposed = True
-
-        if self._callbackID is not None:
-            try:
-                BigWorld.cancelCallback(self._callbackID)
-            except Exception:
-                pass
-            self._callbackID = None
-
         if self._overlay is not None:
             self._overlay.removeLabel(self._numberID)
-
-        callback = self._onDispose
-        self._onDispose = None
         self._overlay = None
         self._projector = None
-        if callback is not None:
-            callback(self)
 
 
 class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
-    """Merges hits in Python, projects a frozen world point, and renders in Flash."""
+    """Merges compatible hits and renders all active numbers from one ticker."""
 
-    SPAWN_HEIGHT = 0.75
-    MERGE_WINDOW = 0.22
+    SPAWN_HEIGHT = 2.5
+    MERGE_WINDOW = 0.06
 
     def __init__(self, vehicleMarkerClass):
         super(FlashDamageOverlay, self).__init__(
@@ -150,6 +135,8 @@ class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
         self._nextNumberID = 1
         self._screenWindow = None
         self._configuredResolution = None
+        self._tickerCallbackID = None
+        self._closed = False
 
         self.createExternalComponent()
         self.movie.backgroundAlpha = 0.0
@@ -168,7 +155,7 @@ class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
         self._screenWindow.addChild(self.component)
         GUI.addRoot(self._screenWindow)
 
-        LOG.info('[DepDamage] exact ProTanki Flash shadow overlay created')
+        LOG.info('[DepDamage] Flash damage overlay created')
 
     def _configureScreen(self):
         resolution = GUI.screenResolution()
@@ -187,7 +174,36 @@ class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
     def removeLabel(self, numberID):
         self.as_removeDamage(numberID)
 
+    def _ensureTicker(self):
+        if self._closed or self._tickerCallbackID is not None:
+            return
+        self._tickerCallbackID = BigWorld.callback(_FlashDamageNumber.TICK, self._tickNumbers)
+
+    def _tickNumbers(self):
+        self._tickerCallbackID = None
+        if self._closed:
+            return
+
+        now = BigWorld.time()
+        for number in tuple(self._numbers):
+            if not number.update(now):
+                self._numbers.discard(number)
+
+        if self._numbers:
+            self._ensureTicker()
+
     def close(self):
+        if self._closed:
+            return
+        self._closed = True
+
+        if self._tickerCallbackID is not None:
+            try:
+                BigWorld.cancelCallback(self._tickerCallbackID)
+            except Exception:
+                pass
+            self._tickerCallbackID = None
+
         for pending in self._pending.values():
             callbackID = pending.get('callbackID')
             if callbackID is not None:
@@ -215,9 +231,6 @@ class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
         finally:
             super(FlashDamageOverlay, self).close()
 
-    def _removeNumber(self, number):
-        self._numbers.discard(number)
-
     def showDamage(self, vehicleID, damage, attackerID, damageType, damageFlag):
         try:
             vehicle = BigWorld.entity(vehicleID)
@@ -236,21 +249,25 @@ class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
             if not visible:
                 return False
 
-            pending = self._pending.get(vehicleID)
+            mergeKey = (int(vehicleID), int(damageFlag))
+            pending = self._pending.get(mergeKey)
             if pending is not None:
                 pending['damage'] += int(damage)
                 pending['point'] = point
-                pending['damageFlag'] = damageFlag
+                return True
+
+            if self.MERGE_WINDOW <= 0.0:
+                self._spawnNumber(point, int(damage), int(damageFlag))
                 return True
 
             callbackID = BigWorld.callback(
                 self.MERGE_WINDOW,
-                lambda vehicleID=vehicleID: self._flushPending(vehicleID)
+                lambda mergeKey=mergeKey: self._flushPending(mergeKey)
             )
-            self._pending[vehicleID] = {
+            self._pending[mergeKey] = {
                 'damage': int(damage),
                 'point': point,
-                'damageFlag': damageFlag,
+                'damageFlag': int(damageFlag),
                 'callbackID': callbackID
             }
             return True
@@ -258,23 +275,27 @@ class FlashDamageOverlay(ExternalFlashComponent, DepDamageFlashMeta):
             LOG.exception('[DepDamage] failed to queue Flash damage number')
             return False
 
-    def _flushPending(self, vehicleID):
-        pending = self._pending.pop(vehicleID, None)
-        if pending is None:
+    def _flushPending(self, mergeKey):
+        pending = self._pending.pop(mergeKey, None)
+        if pending is None or self._closed:
             return
+        self._spawnNumber(pending['point'], pending['damage'], pending['damageFlag'])
+
+    def _spawnNumber(self, point, damage, damageFlag):
         try:
             numberID = self._nextNumberID
             self._nextNumberID += 1
             number = _FlashDamageNumber(
                 numberID,
-                pending['point'],
-                pending['damage'],
-                pending['damageFlag'],
+                point,
+                damage,
+                damageFlag,
                 self,
-                self._projectPoint,
-                self._removeNumber
+                self._projectPoint
             )
             self._numbers.add(number)
+            number.update(BigWorld.time())
+            self._ensureTicker()
         except Exception:
             LOG.exception('[DepDamage] failed to spawn Flash damage number')
 
@@ -310,6 +331,17 @@ def _safe_attack_reason(attackReasonID):
         return ATTACK_REASONS[attackReasonID]
     except Exception:
         return 'unknown'
+
+
+def _is_fire_reason(attackReasonID, damageType):
+    normalized = str(damageType or '').lower()
+    if any(token in normalized for token in ('fire', 'burn', 'flame')):
+        return True
+    try:
+        reason = str(ATTACK_REASONS[attackReasonID] or '').lower()
+        return any(token in reason for token in ('fire', 'burn', 'flame'))
+    except Exception:
+        return False
 
 
 class _DamageOrigin(object):
@@ -348,26 +380,54 @@ class _DamageOrigin(object):
 _ORIGIN = _DamageOrigin()
 
 
-def _start_hook(self, *args, **kwargs):
-    result = _ORIGINAL_START(self, *args, **kwargs)
-    if not _ENABLED:
-        return result
+def _createOverlay():
+    global _OVERLAY
+    if _OVERLAY is None and _ACTIVE_PLUGIN is not None:
+        _OVERLAY = FlashDamageOverlay(_ACTIVE_PLUGIN._clazz)
+
+
+def _closeOverlay():
+    global _OVERLAY
+    if _OVERLAY is not None:
+        try:
+            _OVERLAY.close()
+        finally:
+            _OVERLAY = None
+
+
+def set_enabled(enabled):
+    global _ENABLED
+    enabled = bool(enabled)
+    if _ENABLED == enabled:
+        return
+    _ENABLED = enabled
     try:
-        global _OVERLAY
-        if _OVERLAY is None:
-            _OVERLAY = FlashDamageOverlay(self._clazz)
+        if enabled:
+            _createOverlay()
+        else:
+            _closeOverlay()
     except Exception:
-        LOG.exception('[DepDamage] failed to create exact-style Flash overlay')
+        LOG.exception('[DepDamage] failed to switch renderer state')
+
+
+def _start_hook(self, *args, **kwargs):
+    global _ACTIVE_PLUGIN
+    result = _ORIGINAL_START(self, *args, **kwargs)
+    _ACTIVE_PLUGIN = self
+    if _ENABLED:
+        try:
+            _createOverlay()
+        except Exception:
+            LOG.exception('[DepDamage] failed to create Flash overlay')
     return result
 
 
 def _stop_hook(self, *args, **kwargs):
+    global _ACTIVE_PLUGIN
     try:
-        global _OVERLAY
-        if _OVERLAY is not None:
-            _OVERLAY.close()
-            _OVERLAY = None
+        _closeOverlay()
         _LAST_HEALTH.clear()
+        _ACTIVE_PLUGIN = None
     except Exception:
         LOG.exception('[DepDamage] failed to close Flash overlay')
     return _ORIGINAL_STOP(self, *args, **kwargs)
@@ -379,6 +439,11 @@ def _set_health_marker_hook(self, vehicleID, handle, newHealth, *args, **kwargs)
 
 
 def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs):
+    if not _ENABLED:
+        return _ORIGINAL_UPDATE_HEALTH(
+            self, vehicleID, handle, newHealth, aInfo, attackReasonID, *args, **kwargs
+        )
+
     normalizedHealth = max(int(newHealth), 0)
     oldHealth = _LAST_HEALTH.get(vehicleID)
 
@@ -393,7 +458,7 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
     self._setHealthMarker(vehicleID, handle, markerHealth)
     _LAST_HEALTH[vehicleID] = normalizedHealth
 
-    if not _ENABLED or oldHealth is None:
+    if oldHealth is None:
         return None
 
     try:
@@ -406,9 +471,11 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         attackerID = aInfo.vehicleID if aInfo else 0
         damageFlag = _ORIGIN.get_damage_flag(aInfo)
         damageType = _safe_attack_reason(attackReasonID)
+        if _is_fire_reason(attackReasonID, damageType):
+            damageFlag += FIRE_FLAG_OFFSET
         _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
     except Exception:
-        LOG.exception('[DepDamage] updateVehicleHealth exact-style Flash hook failed')
+        LOG.exception('[DepDamage] updateVehicleHealth Flash hook failed')
     return None
 
 
@@ -429,25 +496,33 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] exact ProTanki DropShadowFilter renderer patched')
+    LOG.info('[DepDamage] renderer patched')
+
+
+def _unpatch():
+    global _PATCHED
+    if not _PATCHED:
+        return
+    try:
+        VehicleMarkerPlugin.start = _ORIGINAL_START
+        VehicleMarkerPlugin.stop = _ORIGINAL_STOP
+        VehicleMarkerPlugin._setHealthMarker = _ORIGINAL_SET_HEALTH
+        VehicleMarkerPlugin._updateVehicleHealth = _ORIGINAL_UPDATE_HEALTH
+    finally:
+        _PATCHED = False
 
 
 def init():
-    global _ENABLED
     _patch()
-    _ENABLED = True
+    set_enabled(True)
     _ORIGIN.update_player_vehicle_id()
     LOG.info('[DepDamage] hooks enabled')
 
 
 def fini():
-    global _ENABLED, _OVERLAY
-    _ENABLED = False
-    try:
-        if _OVERLAY is not None:
-            _OVERLAY.close()
-            _OVERLAY = None
-    except Exception:
-        LOG.exception('[DepDamage] Flash overlay close failed during fini')
+    global _ACTIVE_PLUGIN
+    set_enabled(False)
     _LAST_HEALTH.clear()
+    _ACTIVE_PLUGIN = None
+    _unpatch()
     LOG.info('[DepDamage] hooks disabled')
