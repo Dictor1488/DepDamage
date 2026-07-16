@@ -26,9 +26,20 @@ package com.flyingdamage
 
         public function as_createDamage(id:int, damage:int, damageFlag:int,
                                         playerColor:String, allyColor:String,
-                                        enemyColor:String, fontSize:int):void
+                                        enemyColor:String, allyFireColor:String,
+                                        enemyFireColor:String, fontSize:int):void
         {
-            _layer.createDamage(id, damage, damageFlag, playerColor, allyColor, enemyColor, fontSize);
+            _layer.createDamage(
+                id,
+                damage,
+                damageFlag,
+                playerColor,
+                allyColor,
+                enemyColor,
+                allyFireColor,
+                enemyFireColor,
+                fontSize
+            );
         }
 
         public function as_updateDamage(id:int, xPos:Number, yPos:Number, alphaValue:Number, isVisible:Boolean):void
