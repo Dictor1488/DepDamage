@@ -33,11 +33,11 @@ _LAST_HEALTH = {}
 
 
 class _NativeDamageNumber(object):
-    """One number detached from the vehicle but anchored to a frozen world point."""
+    """One number detached from the vehicle and anchored to a frozen world point."""
 
-    DURATION = 1.15
-    WORLD_RISE = 2.2
-    TICK = 0.016
+    DURATION = 2.0
+    WORLD_RISE = 1.45
+    TICK = 0.025
 
     def __init__(self, worldPoint, damage, damageFlag, projector, onDispose):
         self._worldPoint = Math.Vector3(worldPoint.x, worldPoint.y, worldPoint.z)
@@ -56,7 +56,6 @@ class _NativeDamageNumber(object):
         self._text.colour = self._getColour(0.0)
         self._text.visible = False
         GUI.addRoot(self._text)
-
         self._tick()
 
     def _baseRGB(self):
@@ -71,12 +70,11 @@ class _NativeDamageNumber(object):
         return (255.0, 255.0, 255.0)
 
     def _getColour(self, progress):
-        if progress < 0.12:
-            alpha = progress / 0.12
-        elif progress > 0.72:
-            alpha = max(0.0, 1.0 - (progress - 0.72) / 0.28)
-        else:
-            alpha = 1.0
+        # No fade-in: it caused a visible blink on spawn. Keep the number solid
+        # for most of its lifetime and fade only near the end.
+        alpha = 1.0
+        if progress > 0.78:
+            alpha = max(0.0, 1.0 - (progress - 0.78) / 0.22)
         r, g, b = self._baseRGB()
         return (r, g, b, 255.0 * alpha)
 
@@ -94,12 +92,11 @@ class _NativeDamageNumber(object):
             self.dispose()
             return
 
-        # Freeze X/Z at the impact location. Only world-space height changes.
-        # The point is projected again every frame, so turning the camera moves
-        # the number exactly like a stationary object in the world, not like HUD.
+        # Smooth ease-out: starts moving immediately, then slows near the top.
+        eased = 1.0 - (1.0 - progress) * (1.0 - progress)
         point = Math.Vector3(
             self._worldPoint.x,
-            self._worldPoint.y + self.WORLD_RISE * progress,
+            self._worldPoint.y + self.WORLD_RISE * eased,
             self._worldPoint.z
         )
         projected, visible = self._projector(point)
@@ -137,16 +134,28 @@ class _NativeDamageNumber(object):
 
 
 class NativeDamageOverlay(object):
-    """Captures a marker world point once and animates from that frozen point."""
+    """Captures a marker world point, merges burst hits, then animates one sum."""
+
+    SPAWN_HEIGHT = 0.75
+    MERGE_WINDOW = 0.22
 
     def __init__(self, vehicleMarkerClass):
         self._vehicleMarkerClass = vehicleMarkerClass
         self._viewProjection = Math.Matrix()
         self._tempMatrix = Math.Matrix()
         self._numbers = set()
-        LOG.info('[DepDamage] frozen world-point overlay created')
+        self._pending = {}
+        LOG.info('[DepDamage] polished frozen world-point overlay created')
 
     def close(self):
+        for pending in self._pending.values():
+            callbackID = pending.get('callbackID')
+            if callbackID is not None:
+                try:
+                    BigWorld.cancelCallback(callbackID)
+                except Exception:
+                    pass
+        self._pending.clear()
         for number in tuple(self._numbers):
             number.dispose()
         self._numbers.clear()
@@ -162,23 +171,53 @@ class NativeDamageOverlay(object):
 
             provider = self._vehicleMarkerClass.fetchMatrixProvider(vehicle)
             self._tempMatrix.set(provider)
-            point = self._tempMatrix.translation
+            markerPoint = self._tempMatrix.translation
+            point = Math.Vector3(
+                markerPoint.x,
+                markerPoint.y + self.SPAWN_HEIGHT,
+                markerPoint.z
+            )
             _, visible = self._projectPoint(point)
             if not visible:
                 return False
 
+            pending = self._pending.get(vehicleID)
+            if pending is not None:
+                pending['damage'] += int(damage)
+                pending['point'] = point
+                pending['damageFlag'] = damageFlag
+                return True
+
+            callbackID = BigWorld.callback(
+                self.MERGE_WINDOW,
+                lambda vehicleID=vehicleID: self._flushPending(vehicleID)
+            )
+            self._pending[vehicleID] = {
+                'damage': int(damage),
+                'point': point,
+                'damageFlag': damageFlag,
+                'callbackID': callbackID
+            }
+            return True
+        except Exception:
+            LOG.exception('[DepDamage] failed to queue frozen world damage number')
+            return False
+
+    def _flushPending(self, vehicleID):
+        pending = self._pending.pop(vehicleID, None)
+        if pending is None:
+            return
+        try:
             number = _NativeDamageNumber(
-                point,
-                damage,
-                damageFlag,
+                pending['point'],
+                pending['damage'],
+                pending['damageFlag'],
                 self._projectPoint,
                 self._removeNumber
             )
             self._numbers.add(number)
-            return True
         except Exception:
-            LOG.exception('[DepDamage] failed to show frozen world damage number')
-            return False
+            LOG.exception('[DepDamage] failed to spawn merged damage number')
 
     def _projectPoint(self, point):
         camera = BigWorld.camera()
@@ -254,7 +293,6 @@ def _start_hook(self, *args, **kwargs):
     result = _ORIGINAL_START(self, *args, **kwargs)
     if not _ENABLED:
         return result
-
     try:
         global _OVERLAY
         if _OVERLAY is None:
@@ -302,7 +340,6 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
     try:
         if g_replayCtrl.isPlaying and g_replayCtrl.isTimeWarpInProgress:
             return None
-
         damage = oldHealth - normalizedHealth
         if damage <= 0 or _OVERLAY is None:
             return None
@@ -313,7 +350,6 @@ def _update_vehicle_health_hook(self, vehicleID, handle, newHealth, aInfo, attac
         _OVERLAY.showDamage(vehicleID, damage, attackerID, damageType, damageFlag)
     except Exception:
         LOG.exception('[DepDamage] updateVehicleHealth frozen world hook failed')
-
     return None
 
 
@@ -334,7 +370,7 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] frozen world-point damage renderer patched')
+    LOG.info('[DepDamage] polished animation and burst merge renderer patched')
 
 
 def init():
