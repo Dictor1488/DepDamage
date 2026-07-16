@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Localized and persistent in-game settings for DepDamage."""
+"""Localized, validated and persistent in-game settings for DepDamage."""
 
 import json
 import logging
@@ -34,7 +34,6 @@ DEFAULTS = {
 
 SETTINGS = dict(DEFAULTS)
 TEMPLATE = None
-_ORIGINAL_SHOW_DAMAGE = None
 
 LANG_ALIASES = {
     'ua': 'uk',
@@ -148,20 +147,83 @@ def _settings_path():
     )
 
 
+def _clean_color(value, fallback):
+    try:
+        value = str(value or fallback).replace('#', '').upper()
+    except Exception:
+        return fallback
+    if len(value) != 6:
+        return fallback
+    try:
+        int(value, 16)
+    except Exception:
+        return fallback
+    return value
+
+
+def _safe_bool(value, fallback):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    try:
+        normalized = str(value).strip().lower()
+    except Exception:
+        return fallback
+    if normalized in ('true', '1', 'yes', 'on'):
+        return True
+    if normalized in ('false', '0', 'no', 'off'):
+        return False
+    return fallback
+
+
+def _safe_int(value, fallback, minimum, maximum):
+    try:
+        value = int(round(float(value)))
+    except Exception:
+        value = fallback
+    return max(minimum, min(maximum, value))
+
+
+def _safe_float(value, fallback, minimum, maximum):
+    try:
+        value = float(value)
+    except Exception:
+        value = fallback
+    return max(minimum, min(maximum, value))
+
+
+def _sanitize_settings(values):
+    values = values if isinstance(values, dict) else {}
+    return {
+        'enabled': _safe_bool(values.get('enabled'), DEFAULTS['enabled']),
+        'playerColor': _clean_color(values.get('playerColor'), DEFAULTS['playerColor']),
+        'allyColor': _clean_color(values.get('allyColor'), DEFAULTS['allyColor']),
+        'enemyColor': _clean_color(values.get('enemyColor'), DEFAULTS['enemyColor']),
+        'allyFireColor': _clean_color(values.get('allyFireColor'), DEFAULTS['allyFireColor']),
+        'enemyFireColor': _clean_color(values.get('enemyFireColor'), DEFAULTS['enemyFireColor']),
+        'fontSize': _safe_int(values.get('fontSize'), DEFAULTS['fontSize'], 14, 32),
+        'animationDuration': _safe_float(
+            values.get('animationDuration'), DEFAULTS['animationDuration'], 0.6, 4.0
+        ),
+        'spawnHeight': _safe_float(values.get('spawnHeight'), DEFAULTS['spawnHeight'], 0.0, 4.0),
+    }
+
+
 def _load_persistent_settings():
     path = _settings_path()
     try:
         if not os.path.isfile(path):
-            return
+            return False
         with open(path, 'rb') as stream:
             saved = json.loads(stream.read().decode('utf-8'))
-        if isinstance(saved, dict):
-            for key in DEFAULTS:
-                if key in saved:
-                    SETTINGS[key] = saved[key]
-            LOG.info('[DepDamage] persistent settings loaded')
+        SETTINGS.update(_sanitize_settings(saved))
+        LOG.info('[DepDamage] persistent settings loaded')
+        return True
     except Exception:
-        LOG.exception('[DepDamage] failed to load persistent settings')
+        LOG.exception('[DepDamage] failed to load persistent settings; defaults will be used')
+        SETTINGS.update(DEFAULTS)
+        return False
 
 
 def _save_persistent_settings():
@@ -170,8 +232,8 @@ def _save_persistent_settings():
         directory = os.path.dirname(path)
         if not os.path.isdir(directory):
             os.makedirs(directory)
-        payload = dict((key, SETTINGS.get(key, value)) for key, value in DEFAULTS.items())
-        data = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+        SETTINGS.update(_sanitize_settings(SETTINGS))
+        data = json.dumps(dict(SETTINGS), ensure_ascii=False, indent=2, sort_keys=True)
         if not isinstance(data, bytes):
             data = data.encode('utf-8')
         tempPath = path + '.tmp'
@@ -230,29 +292,13 @@ def _build_template():
     }
 
 
-def _clean_color(value, fallback):
-    value = str(value or fallback).replace('#', '').upper()
-    if len(value) != 6:
-        return fallback
-    try:
-        int(value, 16)
-    except Exception:
-        return fallback
-    return value
-
-
 def _apply():
-    hooks._ENABLED = bool(SETTINGS.get('enabled', True))
-    hooks._FlashDamageNumber.DURATION = max(
-        0.1,
-        float(SETTINGS.get('animationDuration', DEFAULTS['animationDuration']))
-    )
+    SETTINGS.update(_sanitize_settings(SETTINGS))
+    hooks._FlashDamageNumber.DURATION = SETTINGS['animationDuration']
     hooks._FlashDamageNumber.TICK = 1.0 / 120.0
     hooks.FlashDamageOverlay.MERGE_WINDOW = 0.06
-    hooks.FlashDamageOverlay.SPAWN_HEIGHT = max(
-        0.0,
-        float(SETTINGS.get('spawnHeight', DEFAULTS['spawnHeight']))
-    )
+    hooks.FlashDamageOverlay.SPAWN_HEIGHT = SETTINGS['spawnHeight']
+    hooks.set_enabled(SETTINGS['enabled'])
 
 
 def _as_create_damage(self, numberID, damage, damageFlag):
@@ -261,66 +307,48 @@ def _as_create_damage(self, numberID, damage, damageFlag):
             numberID,
             damage,
             damageFlag,
-            _clean_color(SETTINGS.get('playerColor'), DEFAULTS['playerColor']),
-            _clean_color(SETTINGS.get('allyColor'), DEFAULTS['allyColor']),
-            _clean_color(SETTINGS.get('enemyColor'), DEFAULTS['enemyColor']),
-            _clean_color(SETTINGS.get('allyFireColor'), DEFAULTS['allyFireColor']),
-            _clean_color(SETTINGS.get('enemyFireColor'), DEFAULTS['enemyFireColor']),
-            int(SETTINGS.get('fontSize', DEFAULTS['fontSize']))
+            SETTINGS['playerColor'],
+            SETTINGS['allyColor'],
+            SETTINGS['enemyColor'],
+            SETTINGS['allyFireColor'],
+            SETTINGS['enemyFireColor'],
+            SETTINGS['fontSize']
         )
-
-
-def _show_damage_with_fire(self, vehicleID, damage, attackerID, damageType, damageFlag):
-    normalizedType = str(damageType or '').lower()
-    if 'fire' in normalizedType:
-        damageFlag = int(damageFlag) + 10
-    return _ORIGINAL_SHOW_DAMAGE(
-        self,
-        vehicleID,
-        damage,
-        attackerID,
-        damageType,
-        damageFlag
-    )
 
 
 def _on_changed(linkage, newSettings):
     if linkage != MOD_LINKAGE:
         return
-    SETTINGS.update(newSettings or {})
+    merged = dict(SETTINGS)
+    if isinstance(newSettings, dict):
+        merged.update(newSettings)
+    SETTINGS.update(_sanitize_settings(merged))
     _apply()
     _save_persistent_settings()
     LOG.info('[DepDamage] settings updated')
 
 
 def init():
-    global SETTINGS, TEMPLATE, _ORIGINAL_SHOW_DAMAGE
+    global TEMPLATE
 
     hooks.DepDamageFlashMeta.as_createDamage = _as_create_damage
 
-    if _ORIGINAL_SHOW_DAMAGE is None:
-        _ORIGINAL_SHOW_DAMAGE = hooks.FlashDamageOverlay.showDamage
-        hooks.FlashDamageOverlay.showDamage = _show_damage_with_fire
-
-    _load_persistent_settings()
+    hasPersistentSettings = _load_persistent_settings()
     TEMPLATE = _build_template()
 
-    if g_modsSettingsApi is None:
-        _apply()
-        _save_persistent_settings()
-        LOG.warning('[DepDamage] ModsSettingsAPI not found; using persistent built-in settings')
-        return
-
-    saved = g_modsSettingsApi.getModSettings(MOD_LINKAGE, TEMPLATE)
-    if saved:
-        SETTINGS.update(saved)
-        _load_persistent_settings()
-        TEMPLATE = _build_template()
-        g_modsSettingsApi.registerCallback(MOD_LINKAGE, _on_changed)
+    if g_modsSettingsApi is not None:
+        saved = g_modsSettingsApi.getModSettings(MOD_LINKAGE, TEMPLATE)
+        if not hasPersistentSettings and saved:
+            SETTINGS.update(_sanitize_settings(saved))
+            TEMPLATE = _build_template()
+        if saved:
+            g_modsSettingsApi.registerCallback(MOD_LINKAGE, _on_changed)
+        else:
+            created = g_modsSettingsApi.setModTemplate(MOD_LINKAGE, TEMPLATE, _on_changed)
+            if not hasPersistentSettings and created:
+                SETTINGS.update(_sanitize_settings(created))
     else:
-        created = g_modsSettingsApi.setModTemplate(MOD_LINKAGE, TEMPLATE, _on_changed)
-        if created:
-            SETTINGS.update(created)
+        LOG.warning('[DepDamage] ModsSettingsAPI not found; using persistent built-in settings')
 
     _apply()
     _save_persistent_settings()
