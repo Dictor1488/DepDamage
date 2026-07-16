@@ -19,8 +19,8 @@ DEFAULTS = {
     'allyColor': '5BE36A',
     'enemyColor': 'FF5A5A',
     'fontSize': 22,
-    'animationDuration': 1.25,
-    'spawnHeight': 1.55,
+    'animationDuration': 1.45,
+    'spawnHeight': 1.85,
 }
 
 SETTINGS = dict(DEFAULTS)
@@ -106,6 +106,8 @@ def _apply():
         0.1,
         float(SETTINGS.get('animationDuration', DEFAULTS['animationDuration']))
     )
+    # Update close to 60 FPS for a visibly smoother world-space rise.
+    hooks._FlashDamageNumber.TICK = 0.016
     hooks.FlashDamageOverlay.SPAWN_HEIGHT = max(
         0.0,
         float(SETTINGS.get('spawnHeight', DEFAULTS['spawnHeight']))
