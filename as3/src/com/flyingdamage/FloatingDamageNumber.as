@@ -73,7 +73,11 @@ package com.flyingdamage
             ];
             _tf.text = text;
             _tf.x = -120;
-            _tf.y = -Math.round(size * 0.82);
+
+            // Keep the complete glyph above the projected world point. Previously
+            // the field straddled the anchor and visually looked as if it emerged
+            // from underneath the vehicle even with a high world-space offset.
+            _tf.y = -Math.round(size * 1.75);
             addChild(_tf);
         }
 
