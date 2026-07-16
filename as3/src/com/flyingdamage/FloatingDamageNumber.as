@@ -2,7 +2,9 @@ package com.flyingdamage
 {
     import flash.display.Sprite;
     import flash.filters.DropShadowFilter;
+    import flash.filters.GlowFilter;
     import flash.text.AntiAliasType;
+    import flash.text.GridFitType;
     import flash.text.TextField;
     import flash.text.TextFormat;
 
@@ -15,6 +17,7 @@ package com.flyingdamage
         {
             mouseEnabled = false;
             mouseChildren = false;
+            cacheAsBitmap = true;
             _damage = damage;
 
             var color:uint = uint('0x' + colorHex);
@@ -24,10 +27,13 @@ package com.flyingdamage
             _tf.mouseEnabled = false;
             _tf.selectable = false;
             _tf.antiAliasType = AntiAliasType.ADVANCED;
-            _tf.width = 220;
-            _tf.height = 80;
+            _tf.gridFitType = GridFitType.PIXEL;
+            _tf.sharpness = 180;
+            _tf.thickness = 80;
+            _tf.width = 240;
+            _tf.height = 90;
             _tf.defaultTextFormat = new TextFormat(
-                '$FieldFont',
+                '$TitleFont',
                 size,
                 color,
                 true,
@@ -38,16 +44,27 @@ package com.flyingdamage
                 'center'
             );
 
-            // Clean readable style: slightly bold text with a soft black shadow.
+            // Crisp game-style edge plus a compact soft shadow. This keeps the
+            // number readable without the smeared low-resolution appearance.
             _tf.filters = [
+                new GlowFilter(
+                    0x000000,
+                    0.78,
+                    2.2,
+                    2.2,
+                    2.4,
+                    1,
+                    false,
+                    false
+                ),
                 new DropShadowFilter(
                     1,
                     90,
                     0x000000,
-                    0.85,
-                    3,
-                    3,
-                    2.2,
+                    0.92,
+                    2.5,
+                    2.5,
+                    2.5,
                     1,
                     false,
                     false,
@@ -55,8 +72,8 @@ package com.flyingdamage
                 )
             ];
             _tf.text = text;
-            _tf.x = -110;
-            _tf.y = -20;
+            _tf.x = -120;
+            _tf.y = -Math.round(size * 0.82);
             addChild(_tf);
         }
 
@@ -67,8 +84,8 @@ package com.flyingdamage
 
         public function updateScreenPosition(xPos:Number, yPos:Number, alphaValue:Number, isVisible:Boolean):void
         {
-            x = xPos;
-            y = yPos;
+            x = Math.round(xPos);
+            y = Math.round(yPos);
             alpha = alphaValue;
             visible = isVisible;
         }
