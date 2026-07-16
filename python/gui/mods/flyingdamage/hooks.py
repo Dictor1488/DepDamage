@@ -38,17 +38,8 @@ class _NativeDamageNumber(object):
     DURATION = 2.0
     WORLD_RISE = 1.45
     TICK = 0.025
-    OUTLINE_OFFSET = 0.0022
-    OUTLINE_OFFSETS = (
-        (-OUTLINE_OFFSET, 0.0),
-        (OUTLINE_OFFSET, 0.0),
-        (0.0, -OUTLINE_OFFSET),
-        (0.0, OUTLINE_OFFSET),
-        (-OUTLINE_OFFSET, -OUTLINE_OFFSET),
-        (-OUTLINE_OFFSET, OUTLINE_OFFSET),
-        (OUTLINE_OFFSET, -OUTLINE_OFFSET),
-        (OUTLINE_OFFSET, OUTLINE_OFFSET),
-    )
+    SHADOW_OFFSET_X = 0.0016
+    SHADOW_OFFSET_Y = -0.0016
 
     def __init__(self, worldPoint, damage, damageFlag, projector, onDispose):
         self._worldPoint = Math.Vector3(worldPoint.x, worldPoint.y, worldPoint.z)
@@ -58,43 +49,36 @@ class _NativeDamageNumber(object):
         self._callbackID = None
         self._disposed = False
         self._onDispose = onDispose
-        self._shadows = []
 
         value = '-{}'.format(int(damage))
 
-        # ProTanki-style high-contrast outline: eight native black text layers
-        # around one bright foreground layer. This reproduces the strong black
-        # shadow/outline from the supplied vehicle-marker package without SWF.
-        for _ in self.OUTLINE_OFFSETS:
-            shadow = GUI.Text(value)
-            shadow.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
-            shadow.verticalAnchor = GUI.Simple.eVAnchor.CENTER
-            shadow.font = 'default_large.font'
-            shadow.colour = (0.0, 0.0, 0.0, 255.0)
-            shadow.visible = False
-            GUI.addRoot(shadow)
-            self._shadows.append(shadow)
+        # One compact soft shadow instead of the previous eight-layer outline.
+        self._shadow = GUI.Text(value)
+        self._shadow.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
+        self._shadow.verticalAnchor = GUI.Simple.eVAnchor.CENTER
+        self._shadow.font = 'default_medium.font'
+        self._shadow.colour = (0.0, 0.0, 0.0, 190.0)
+        self._shadow.visible = False
+        GUI.addRoot(self._shadow)
 
         self._text = GUI.Text(value)
         self._text.horizontalAnchor = GUI.Simple.eHAnchor.CENTER
         self._text.verticalAnchor = GUI.Simple.eVAnchor.CENTER
-        self._text.font = 'default_large.font'
-        self._text.materialFX = GUI.Simple.eMaterialFX.ADD
+        self._text.font = 'default_medium.font'
         self._text.colour = self._getColour(0.0)
         self._text.visible = False
         GUI.addRoot(self._text)
         self._tick()
 
     def _baseRGB(self):
-        # Brighter ProTanki-inspired palette with warm player damage.
         if self._damageFlag == FROM_PLAYER:
-            return (255.0, 238.0, 150.0)
+            return (255.0, 235.0, 170.0)
         if self._damageFlag == FROM_SQUAD:
-            return (165.0, 235.0, 255.0)
+            return (170.0, 220.0, 255.0)
         if self._damageFlag == FROM_ALLY:
-            return (170.0, 255.0, 170.0)
+            return (180.0, 255.0, 180.0)
         if self._damageFlag == FROM_ENEMY:
-            return (255.0, 155.0, 155.0)
+            return (255.0, 170.0, 170.0)
         return (255.0, 255.0, 255.0)
 
     def _alpha(self, progress):
@@ -130,18 +114,15 @@ class _NativeDamageNumber(object):
         visible = bool(visible)
         alpha = 255.0 * self._alpha(progress)
 
-        for shadow, offset in zip(self._shadows, self.OUTLINE_OFFSETS):
-            shadow.visible = visible
-            if visible:
-                shadow.position = (
-                    projected.x + offset[0],
-                    projected.y + offset[1],
-                    0.021
-                )
-                shadow.colour = (0.0, 0.0, 0.0, alpha)
-
+        self._shadow.visible = visible
         self._text.visible = visible
         if visible:
+            self._shadow.position = (
+                projected.x + self.SHADOW_OFFSET_X,
+                projected.y + self.SHADOW_OFFSET_Y,
+                0.021
+            )
+            self._shadow.colour = (0.0, 0.0, 0.0, alpha * 0.78)
             self._text.position = (projected.x, projected.y, 0.02)
             self._text.colour = self._getColour(progress)
 
@@ -159,12 +140,12 @@ class _NativeDamageNumber(object):
                 pass
             self._callbackID = None
 
-        for shadow in self._shadows:
+        if self._shadow is not None:
             try:
-                GUI.delRoot(shadow)
+                GUI.delRoot(self._shadow)
             except Exception:
                 pass
-        self._shadows = []
+            self._shadow = None
 
         if self._text is not None:
             try:
@@ -192,7 +173,7 @@ class NativeDamageOverlay(object):
         self._tempMatrix = Math.Matrix()
         self._numbers = set()
         self._pending = {}
-        LOG.info('[DepDamage] ProTanki-style high-contrast overlay created')
+        LOG.info('[DepDamage] clean soft-shadow overlay created')
 
     def close(self):
         for pending in self._pending.values():
@@ -417,7 +398,7 @@ def _patch():
     VehicleMarkerPlugin._updateVehicleHealth = _update_vehicle_health_hook
 
     _PATCHED = True
-    LOG.info('[DepDamage] ProTanki-style outlined damage renderer patched')
+    LOG.info('[DepDamage] clean soft-shadow damage renderer patched')
 
 
 def init():
