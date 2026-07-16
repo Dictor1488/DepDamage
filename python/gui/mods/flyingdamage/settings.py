@@ -18,12 +18,15 @@ DEFAULTS = {
     'playerColor': 'FFD54A',
     'allyColor': '5BE36A',
     'enemyColor': 'FF5A5A',
+    'allyFireColor': '1F7A35',
+    'enemyFireColor': '981F1F',
     'fontSize': 22,
     'animationDuration': 1.45,
-    'spawnHeight': 1.85,
+    'spawnHeight': 2.5,
 }
 
 SETTINGS = dict(DEFAULTS)
+_ORIGINAL_SHOW_DAMAGE = None
 
 TEMPLATE = {
     'modDisplayName': 'DepDamage',
@@ -52,6 +55,18 @@ TEMPLATE = {
             'text': 'Колір урону по противниках',
             'value': DEFAULTS['enemyColor'],
             'varName': 'enemyColor'
+        },
+        {
+            'type': 'ColorChoice',
+            'text': 'Підпал союзників',
+            'value': DEFAULTS['allyFireColor'],
+            'varName': 'allyFireColor'
+        },
+        {
+            'type': 'ColorChoice',
+            'text': 'Підпал противників',
+            'value': DEFAULTS['enemyFireColor'],
+            'varName': 'enemyFireColor'
         }
     ],
     'column2': [
@@ -79,7 +94,7 @@ TEMPLATE = {
             'type': 'Slider',
             'text': 'Висота появи над танком',
             'minimum': 0.0,
-            'maximum': 3.0,
+            'maximum': 4.0,
             'snapInterval': 0.05,
             'value': DEFAULTS['spawnHeight'],
             'format': '{{value}}',
@@ -106,7 +121,6 @@ def _apply():
         0.1,
         float(SETTINGS.get('animationDuration', DEFAULTS['animationDuration']))
     )
-    # Update close to 60 FPS for a visibly smoother world-space rise.
     hooks._FlashDamageNumber.TICK = 0.016
     hooks.FlashDamageOverlay.SPAWN_HEIGHT = max(
         0.0,
@@ -123,8 +137,24 @@ def _as_create_damage(self, numberID, damage, damageFlag):
             _clean_color(SETTINGS.get('playerColor'), DEFAULTS['playerColor']),
             _clean_color(SETTINGS.get('allyColor'), DEFAULTS['allyColor']),
             _clean_color(SETTINGS.get('enemyColor'), DEFAULTS['enemyColor']),
+            _clean_color(SETTINGS.get('allyFireColor'), DEFAULTS['allyFireColor']),
+            _clean_color(SETTINGS.get('enemyFireColor'), DEFAULTS['enemyFireColor']),
             int(SETTINGS.get('fontSize', DEFAULTS['fontSize']))
         )
+
+
+def _show_damage_with_fire(self, vehicleID, damage, attackerID, damageType, damageFlag):
+    normalizedType = str(damageType or '').lower()
+    if 'fire' in normalizedType:
+        damageFlag = int(damageFlag) + 10
+    return _ORIGINAL_SHOW_DAMAGE(
+        self,
+        vehicleID,
+        damage,
+        attackerID,
+        damageType,
+        damageFlag
+    )
 
 
 def _on_changed(linkage, newSettings):
@@ -136,9 +166,13 @@ def _on_changed(linkage, newSettings):
 
 
 def init():
-    global SETTINGS
+    global SETTINGS, _ORIGINAL_SHOW_DAMAGE
 
     hooks.DepDamageFlashMeta.as_createDamage = _as_create_damage
+
+    if _ORIGINAL_SHOW_DAMAGE is None:
+        _ORIGINAL_SHOW_DAMAGE = hooks.FlashDamageOverlay.showDamage
+        hooks.FlashDamageOverlay.showDamage = _show_damage_with_fire
 
     if g_modsSettingsApi is None:
         _apply()
